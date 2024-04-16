@@ -1,0 +1,7 @@
+*.tmp
+*.log
+*.zip
+
+.vscode/
+build/
+result/
