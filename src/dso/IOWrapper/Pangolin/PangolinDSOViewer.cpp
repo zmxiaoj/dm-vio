@@ -40,7 +40,16 @@ namespace IOWrap
 {
 
 
-
+/**
+ * @brief Construct a new Pangolin D S O Viewer:: Pangolin D S O Viewer object
+ * 		  PangolinDSOViewer构造函数
+ * 
+ * @param w int，图像宽度
+ * @param h int，图像高度
+ * @param startRunThread bool，是否启动线程 
+ * @param settingsUtilPassed shared_ptr<dmvio::SettingsUtil>，配置信息
+ * @param normalizeCamSize shared_ptr<double>，归一化相机尺寸
+ */
 PangolinDSOViewer::PangolinDSOViewer(int w, int h, bool startRunThread, std::shared_ptr<dmvio::SettingsUtil>
         settingsUtilPassed, std::shared_ptr<double> normalizeCamSize)
         : HCalib(0), settingsUtil(std::move(settingsUtilPassed)), normalizeCamSize(normalizeCamSize)

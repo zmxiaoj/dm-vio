@@ -71,20 +71,35 @@ dmvio::MainSettings mainSettings;
 dmvio::IMUCalibration imuCalibration;
 dmvio::IMUSettings imuSettings;
 
+/**
+ * @brief 捕获到ctrl+C信号时的处理函数
+ * 
+ * @param s 
+ */
 void my_exit_handler(int s)
 {
     printf("Caught signal %d\n", s);
+    // 结束当前进程，及其全部子线程
     exit(1);
 }
 
+/**
+ * @brief 用于处理ctrl+C信号的函数
+ * 
+ */
 void exitThread()
 {
     struct sigaction sigIntHandler;
+    // 设置信号处理函数
     sigIntHandler.sa_handler = my_exit_handler;
+    // 初始化sa_mask为空，表示无信号被屏蔽(阻塞)
     sigemptyset(&sigIntHandler.sa_mask);
+    // 设置sa_flags为0，表示默认行为
     sigIntHandler.sa_flags = 0;
+    // 注册信号处理函数，当收到SIGINT信号时，调用my_exit_handler函数
     sigaction(SIGINT, &sigIntHandler, NULL);
 
+    // 捕获信号，当收到SIGINT信号时，调用my_exit_handler函数
     while(true) pause();
 }
 
@@ -355,6 +370,7 @@ int main(int argc, char** argv)
 
     bool use16Bit = false;
 
+    // 创建共享指针管理SettingsUtil对象
     auto settingsUtil = std::make_shared<dmvio::SettingsUtil>();
 
     // Create Settings files.
@@ -364,6 +380,7 @@ int main(int argc, char** argv)
 
     // Dataset specific arguments. For other commandline arguments check out MainSettings::parseArgument,
     // MainSettings::registerArgs, IMUSettings.h and IMUInitSettings.h
+    // 注册参数名称
     settingsUtil->registerArg("files", source);
     settingsUtil->registerArg("start", start);
     settingsUtil->registerArg("end", end);
@@ -375,14 +392,17 @@ int main(int argc, char** argv)
     settingsUtil->registerArg("maxPreloadImages", maxPreloadImages);
 
     // This call will parse all commandline arguments and potentially also read a settings yaml file if passed.
+    // 解析命令行参数
     mainSettings.parseArguments(argc, argv, *settingsUtil);
 
+    // 从文件读取IMU配置信息
     if(mainSettings.imuCalibFile != "")
     {
         imuCalibration.loadFromFile(mainSettings.imuCalibFile);
     }
 
     // Print settings to commandline and file.
+    // 打印设置信息到命令行和文件
     std::cout << "Settings:\n";
     settingsUtil->printAllSettings(std::cout);
     {
@@ -392,17 +412,26 @@ int main(int argc, char** argv)
     }
 
     // hook crtl+C.
+    // 创建线程，用于处理ctrl+C信号
     boost::thread exThread = boost::thread(exitThread);
 
+    // 创建ImageFolderReader对象reader
+    // 输入参数数据集路径，相机内参，gamma校准参数，渐晕校准参数，是否使用16位图像
     ImageFolderReader* reader = new ImageFolderReader(source, mainSettings.calib, mainSettings.gammaCalib, mainSettings.vignette, use16Bit);
+    // 加载IMU数据
     reader->loadIMUData(imuFile);
+    // 设置全局相机标定参数
     reader->setGlobalCalibration();
 
+    // 可视化显示
+    // 在当前线程执行viewer可视化线程，创建新的线程执行run()
     if(!disableAllDisplay)
     {
+        // 创建PangolinDSOViewer对象viewer
         IOWrap::PangolinDSOViewer* viewer = new IOWrap::PangolinDSOViewer(wG[0], hG[0], false, settingsUtil,
                                                                           nullptr);
 
+        // 创建线程runThread运行run()，并将reader, viewer作为参数传入
         boost::thread runThread = boost::thread(boost::bind(run, reader, viewer));
 
         viewer->run();
@@ -410,9 +439,15 @@ int main(int argc, char** argv)
         delete viewer;
 
         // Make sure that the destructor of FullSystem, etc. finishes, so all log files are properly flushed.
+        // 由于在单独线程中执行run()，进行阻塞操作，等待runThread线程结束
         runThread.join();
-    }else
+    }
+    // 关闭可视化显示
+    // 在当前线程执行run()
+    else
     {
+        // 直接运行run()，并将reader, nullptr作为参数传入
+        // 在当前线程中执行run()，会在执行完成返回前阻塞
         run(reader, 0);
     }
 

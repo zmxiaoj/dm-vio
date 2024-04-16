@@ -348,6 +348,7 @@ public:
         // Important: This IMU loading method expects that for each image there is an IMU 'measurement' with exactly the same timestamp (the VI-sensor does this).
         // If the sensor does not output this, a fake measurement with this timestamp has to be interpolated in advance.
         // The DM-VIO Python tools have a script to do this.
+		// 要求IMU数据的时间戳和图像的时间戳一一对应，如果传感器数据时间未对齐，需要预先对IMU数据进行插值
         if(imuFile == "")
         {
             imuFile = path.substr(0,path.find_last_of('/')) + "/imu.txt";
