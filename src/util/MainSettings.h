@@ -49,6 +49,7 @@ public:
     std::string imuCalibFile = "";
 
     // only relevant for datasets.
+    // 处理数据集时，设置是否尽可能快处理数据还是调整播放速度
     float playbackSpeed = 0;    // 0 for linearize (play as fast as possible, while sequentializing tracking & mapping). otherwise, factor on timestamps.
     bool preload = false;
 

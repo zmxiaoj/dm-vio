@@ -47,6 +47,8 @@ double setting_maxTimeBetweenKeyframes = 0;
 // The idea of this parameter is that in non-RT mode the systems otherwise can make successive frames keyframes, which only rarely happens in RT mode.
 // Default is -0.5 with means that the parameter is 0.5 in non-RT mode and inactive in RT mode.
 // Fractional values are also possible.
+// 负数表示在非实时模式下使用，正数表示在实时和非实时模式下使用
+// 设定相邻关键帧间的最小非关键帧数
 double setting_minFramesBetweenKeyframes = -0.5;
 
 // minimum idepth for keeping points in the optimization window.

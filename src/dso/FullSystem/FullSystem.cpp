@@ -70,6 +70,14 @@ int CalibHessian::instanceCounter=0;
 
 boost::mutex FrameShell::shellPoseMutex{};
 
+/**
+ * @brief Construct a new Full System:: Full System object
+ *        构造函数
+ * 
+ * @param linearizeOperationPassed 
+ * @param imuCalibration 
+ * @param imuSettings 
+ */
 FullSystem::FullSystem(bool linearizeOperationPassed, const dmvio::IMUCalibration& imuCalibration,
                        dmvio::IMUSettings& imuSettings)
     : linearizeOperation(linearizeOperationPassed), imuIntegration(&Hcalib, imuCalibration, imuSettings,
@@ -1308,13 +1316,23 @@ void FullSystem::mappingLoop()
 	printf("MAPPING FINISHED!\n");
 }
 
+/**
+ * @brief 等待mapping线程结束
+ * 
+ */
 void FullSystem::blockUntilMappingIsFinished()
 {
+	// 创建unique_lock对象lock，自动锁定互斥锁trackMapSyncMutex
 	boost::unique_lock<boost::mutex> lock(trackMapSyncMutex);
+	// 设置runMapping为false
 	runMapping = false;
+	// 通知所有等待的线程
 	trackedFrameSignal.notify_all();
+	// 当lock离开作用域时也会自动释放互斥锁
+	// 手动释放互斥锁，使建图线程能读取runMapping的值
 	lock.unlock();
 
+	// 等待建图线程结束
 	mappingThread.join();
 
 }

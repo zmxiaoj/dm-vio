@@ -325,6 +325,8 @@ private:
 
 	// tracking / mapping synchronization. All protected by [trackMapSyncMutex].
 	boost::mutex trackMapSyncMutex;
+	// 与互斥锁配合使用
+	// 阻塞线程，直到有新的trackedFrame
 	boost::condition_variable trackedFrameSignal;
 	boost::condition_variable mappedFrameSignal;
 	std::deque<FrameHessian*> unmappedTrackedFrames;

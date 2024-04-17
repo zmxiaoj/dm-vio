@@ -494,18 +494,23 @@ private:
 
 	ImageAndExposure* getImage_internal(int id, int unused)
 	{
+		// 使用16位图像
 	    if(use16Bit)
         {
+			// 读取图像
             MinimalImage<unsigned short>* minimg = IOWrap::readImageBW_16U(files[id]);
             assert(minimg);
-            ImageAndExposure* ret2 = undistort->undistort<unsigned short>(
+            // 图像去畸变
+			ImageAndExposure* ret2 = undistort->undistort<unsigned short>(
                     minimg,
                     (exposures.size() == 0 ? 1.0f : exposures[id]),
                     (timestamps.size() == 0 ? 0.0 : timestamps[id]),
                     1.0f / 256.0f);
             delete minimg;
             return ret2;
-        }else
+        }
+		// 使用8位图像
+		else
         {
             MinimalImageB* minimg = getImageRaw_internal(id, 0);
             ImageAndExposure* ret2 = undistort->undistort<unsigned char>(
