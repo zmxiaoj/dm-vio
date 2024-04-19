@@ -124,41 +124,51 @@ void FrameHessian::release()
 	immaturePoints.clear();
 }
 
-
+/**
+ * @brief 生成各层图像金字塔的像素值和梯度
+ * 
+ * @param color [in]，原始图像
+ * @param HCalib [in]，相机标定参数
+ */
 void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 {
-
+	// 初始化金字塔每层像素和梯度的存储空间
 	for(int i=0;i<pyrLevelsUsed;i++)
 	{
+		// 存储每层金字塔的像素、水平梯度(dx)、垂直梯度(dy)
 		dIp[i] = new Eigen::Vector3f[wG[i]*hG[i]];
+		// 存储每层金字塔的像素梯度平方(dx^2 + dy^2)
 		absSquaredGrad[i] = new float[wG[i]*hG[i]];
 	}
+	// 指向原始图像的像素
 	dI = dIp[0];
 
 
 	// make d0
 	int w=wG[0];
 	int h=hG[0];
+	// 将原始图像的像素值赋值给金字塔第0层的像素值
 	for(int i=0;i<w*h;i++)
 		dI[i][0] = color[i];
-
+	// 遍历金字塔每层，生成金字塔每层的像素值和梯度
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
 		int wl = wG[lvl], hl = hG[lvl];
 		Eigen::Vector3f* dI_l = dIp[lvl];
 
 		float* dabs_l = absSquaredGrad[lvl];
+		// 当前金字塔大于0层，计算像素值
 		if(lvl>0)
 		{
+			// 取上一层金字塔的像素值
 			int lvlm1 = lvl-1;
 			int wlm1 = wG[lvlm1];
 			Eigen::Vector3f* dI_lm = dIp[lvlm1];
 
-
-
 			for(int y=0;y<hl;y++)
 				for(int x=0;x<wl;x++)
 				{
+					// 取上一层金字塔的像素值，进行双线性插值
 					dI_l[x + y*wl][0] = 0.25f * (dI_lm[2*x   + 2*y*wlm1][0] +
 												dI_lm[2*x+1 + 2*y*wlm1][0] +
 												dI_lm[2*x   + 2*y*wlm1+wlm1][0] +
@@ -166,23 +176,30 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 				}
 		}
 
+		// 计算当前层图像梯度
+		// 遍历从第2行到倒数第2行的像素
 		for(int idx=wl;idx < wl*(hl-1);idx++)
 		{
+			// ???左右边缘处的梯度计算是否会出现错误
+			// 水平梯度由左右像素差分得到
 			float dx = 0.5f*(dI_l[idx+1][0] - dI_l[idx-1][0]);
+			// 垂直梯度由上下像素差分得到
 			float dy = 0.5f*(dI_l[idx+wl][0] - dI_l[idx-wl][0]);
 
-
+			// 如果梯度不是有限值，设置为0
 			if(!std::isfinite(dx)) dx=0;
 			if(!std::isfinite(dy)) dy=0;
 
+			// 存储像素梯度
 			dI_l[idx][1] = dx;
 			dI_l[idx][2] = dy;
 
-
+			// 计算像素梯度平方
 			dabs_l[idx] = dx*dx+dy*dy;
 
 			if(setting_gammaWeightsPixelSelect==1 && HCalib!=0)
 			{
+				// 计算关于响应函数的梯度
 				float gw = HCalib->getBGradOnly((float)(dI_l[idx][0]));
 				dabs_l[idx] *= gw*gw;	// convert to gradient of original color space (before removing response).
 			}

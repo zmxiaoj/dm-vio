@@ -47,26 +47,46 @@
 namespace dso
 {
 
-
+/**
+ * @brief 分配指定大小的内存并对齐
+ * 
+ * @tparam b 
+ * @tparam T 
+ * @param size 
+ * @param rawPtrVec 
+ * @return T* 
+ */
 template<int b, typename T>
 T* allocAligned(int size, std::vector<T*> &rawPtrVec)
 {
     const int padT = 1 + ((1 << b)/sizeof(T));
     T* ptr = new T[size + padT];
+	// 将原始的指针保存到rawPtrVec中
     rawPtrVec.push_back(ptr);
+	// 将内存对齐
     T* alignedPtr = (T*)(( ((uintptr_t)(ptr+padT)) >> b) << b);
     return alignedPtr;
 }
 
-
+/**
+ * @brief Construct a new Coarse Tracker:: Coarse Tracker object
+ *        构造CoarseTracker对象
+ * @param ww 
+ * @param hh 
+ * @param imuIntegration 
+ */
 CoarseTracker::CoarseTracker(int ww, int hh, dmvio::IMUIntegration &imuIntegration) : lastRef_aff_g2l(0, 0), imuIntegration(imuIntegration)
 {
 	// make coarse tracking templates.
+	// 进行粗跟踪
+	// 遍历金字塔各层
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
+		// 计算当前层图像的宽高
 		int wl = ww>>lvl;
         int hl = hh>>lvl;
-
+		
+		// 分配对齐内存并初始化相关变量
         idepth[lvl] = allocAligned<4,float>(wl*hl, ptrToDelete);
         weightSums[lvl] = allocAligned<4,float>(wl*hl, ptrToDelete);
         weightSums_bak[lvl] = allocAligned<4,float>(wl*hl, ptrToDelete);
@@ -899,24 +919,35 @@ void CoarseTracker::debugPlotIDepthMapFloat(std::vector<IOWrap::Output3DWrapper*
 
 
 
-
+/**
+ * @brief Construct a new Coarse Distance Map:: Coarse Distance Map object
+ *        构造函数，初始化CoarseDistanceMap对象
+ * @param ww 
+ * @param hh 
+ */
 CoarseDistanceMap::CoarseDistanceMap(int ww, int hh)
 {
+	// 初始化数组
 	fwdWarpedIDDistFinal = new float[ww*hh/4];
 
+	// 初始化vector保存Eigen::Vector2i
 	bfsList1 = new Eigen::Vector2i[ww*hh/4];
 	bfsList2 = new Eigen::Vector2i[ww*hh/4];
 
+	// fac=2^(pyrLevelsUsed-1)
 	int fac = 1 << (pyrLevelsUsed-1);
 
-
+	// 初始化PointFrameResidual指针数组
+	// 大小为图像在金字塔pyrLevelsUsed层的分辨率 * 2048
 	coarseProjectionGrid = new PointFrameResidual*[2048*(ww*hh/(fac*fac))];
+	// 初始化int数组，记录每个网格中的点的数量
 	coarseProjectionGridNum = new int[ww*hh/(fac*fac)];
 
 	w[0]=h[0]=0;
 }
 CoarseDistanceMap::~CoarseDistanceMap()
 {
+	// 销毁相关动态数组
 	delete[] fwdWarpedIDDistFinal;
 	delete[] bfsList1;
 	delete[] bfsList2;

@@ -245,8 +245,11 @@ struct FrameHessian
 	};
 	inline FrameHessian()
 	{
+		// 实例计数增加
 		instanceCounter++;
+		// 标记不进行边缘化
 		flaggedForMarginalization=false;
+		// 初始化帧变量
 		frameID = -1;
 		efFrame = 0;
 		frameEnergyTH = 8*8*patternNum;

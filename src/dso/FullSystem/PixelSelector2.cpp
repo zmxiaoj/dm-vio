@@ -62,11 +62,12 @@ PixelSelector::PixelSelector(int w, int h)
 
     std::cout << "PixelSelector: Using block sizes: " << bW << ", " << bH << '\n';
 
+	// 初始化数组用于存储梯度直方图和阈值
 	gradHist = new int[100*(1+nbW)*(1+nbH)];
 	ths = new float[(nbW)*(nbH)+100];
 	thsSmoothed = new float[(nbW)*(nbH)+100];
 
-
+	// 设置标志控制是否允许快速像素选择
 	allowFast=false;
 	gradHistFrame=0;
 }

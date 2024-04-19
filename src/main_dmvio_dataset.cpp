@@ -142,7 +142,7 @@ void run(ImageFolderReader* reader, IOWrap::PangolinDSOViewer* viewer)
         linc = -1;
     }
 
-    // 是否尽可能快地处理数据集数据
+    // 标记是否尽可能快地处理数据集数据
     bool linearizeOperation = (mainSettings.playbackSpeed == 0);
 
     // 针对非实时模式，设置相邻关键帧间的最小帧数
@@ -239,6 +239,7 @@ void run(ImageFolderReader* reader, IOWrap::PangolinDSOViewer* viewer)
     // 加载数据集的GT
     bool gtDataThere = reader->loadGTData(gtFile);
 
+    // 标记之前的IMU数据是否被跳过
     bool imuDataSkipped = false;
     dmvio::IMUData skippedIMUData;
     // 遍历图像id
@@ -301,13 +302,17 @@ void run(ImageFolderReader* reader, IOWrap::PangolinDSOViewer* viewer)
         // 不跳过当前帧
         if(!skipFrame)
         {
-            // 如果IMU数据被跳过，且存在IMU数据
+            // 如果之前的IMU数据被跳过，且当前帧对应的IMU数据非空
             if(imuDataSkipped && imuData)
             {
+                // 将skippedIMUData容器中之前跳过的IMU数据插入imuData容器中
                 imuData->insert(imuData->begin(), skippedIMUData.begin(), skippedIMUData.end());
+                // 清空skippedIMUData容器
                 skippedIMUData.clear();
+                // 更新IMU数据被跳过标记
                 imuDataSkipped = false;
             }
+            // 将当前帧的图像数据及累积的IMU数据(GT，如果有)作为活动帧加入fullSystem中
             fullSystem->addActiveFrame(img, i, imuData.get(), (gtDataThere && found) ? &data : 0);
             // 更新可视化位姿
             if(gtDataThere && found && !disableAllDisplay)
@@ -327,19 +332,27 @@ void run(ImageFolderReader* reader, IOWrap::PangolinDSOViewer* viewer)
         // 删除img对象
         delete img;
 
+        // 如果fullSystem初始化失败或者设置了fullResetRequested标记
         if(fullSystem->initFailed || setting_fullResetRequested)
         {
+            // 如果当前帧id小于250或者设置了fullResetRequested标记
             if(ii < 250 || setting_fullResetRequested)
             {
                 printf("RESETTING!\n");
                 std::vector<IOWrap::Output3DWrapper*> wraps = fullSystem->outputWrapper;
+                // 销毁fullSystem对象
                 delete fullSystem;
+                // 遍历wraps容器，重置每个Output3DWrapper对象
                 for(IOWrap::Output3DWrapper* ow : wraps) ow->reset();
 
+                // 创建新的fullSystem对象
                 fullSystem = new FullSystem(linearizeOperation, imuCalibration, imuSettings);
+                // 设置gamma校准参数
                 fullSystem->setGammaFunction(reader->getPhotometricGamma());
+                // 新的fullSystem对象使用原有的wraps容器
                 fullSystem->outputWrapper = wraps;
 
+                // 重置fullResetRequested标记
                 setting_fullResetRequested = false;
             }
         }
@@ -370,11 +383,12 @@ void run(ImageFolderReader* reader, IOWrap::PangolinDSOViewer* viewer)
     fullSystem->printResult(imuSettings.resultsPrefix + "result.txt", false, false, true);
     fullSystem->printResult(imuSettings.resultsPrefix + "resultKFs.txt", true, false, false);
     fullSystem->printResult(imuSettings.resultsPrefix + "resultScaled.txt", false, true, true);
-
+    // 保存时间测量结果
     dmvio::TimeMeasurement::saveResults(imuSettings.resultsPrefix + "timings.txt");
 
-
+    // 已处理的帧数
     int numFramesProcessed = abs(idsToPlay[0] - idsToPlay.back());
+    // 已处理的时间
     double numSecondsProcessed = fabs(reader->getTimestamp(idsToPlay[0]) - reader->getTimestamp(idsToPlay.back()));
     double MilliSecondsTakenSingle = 1000.0f * (ended - started) / (float) (CLOCKS_PER_SEC);
     double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec - tv_start.tv_sec) * 1000.0f +

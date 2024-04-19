@@ -801,9 +801,16 @@ void CoarseInitializer::makeGradients(Eigen::Vector3f** data)
 		}
 	}
 }
+
+/**
+ * @brief 初始化第一帧
+ * 
+ * @param HCalib 
+ * @param newFrameHessian 
+ */
 void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHessian)
 {
-
+	// 计算图像每层的内参
 	makeK(HCalib);
 	firstFrame = newFrameHessian;
 

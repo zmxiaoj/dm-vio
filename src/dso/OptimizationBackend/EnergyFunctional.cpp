@@ -108,7 +108,12 @@ void EnergyFunctional::setAdjointsF(CalibHessian* Hcalib)
 }
 
 
-
+/**
+ * @brief Construct a new Energy Functional:: Energy Functional object
+ *        构造EnergyFunctional对象
+ * 
+ * @param gtsamIntegration 
+ */
 EnergyFunctional::EnergyFunctional(dmvio::BAGTSAMIntegration &gtsamIntegration) : gtsamIntegration(gtsamIntegration)
 {
 	adHost=0;

@@ -38,6 +38,15 @@ using namespace dmvio;
 using std::cout;
 using std::endl;
 
+/**
+ * @brief Construct a new IMUIntegration::IMUIntegration object
+ *        构造函数，初始化IMUIntegration对象
+ * 
+ * @param HCalib 
+ * @param imuCalibrationPassed 
+ * @param imuSettingsPassed 
+ * @param linearizeOperationPassed 
+ */
 IMUIntegration::IMUIntegration(dso::CalibHessian* HCalib, const IMUCalibration& imuCalibrationPassed,
                                IMUSettings& imuSettingsPassed, bool linearizeOperationPassed)
         : linearizeOperation(linearizeOperationPassed), preparedKeyframe(-1), preparedKFCreated(false),

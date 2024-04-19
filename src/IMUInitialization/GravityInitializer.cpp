@@ -32,6 +32,13 @@ GravityInitializer::GravityInitializer(int numMeasurementsToUse, const IMUCalibr
     gravity = imuCalibration.gravity;
 }
 
+/**
+ * @brief 初始化时将IMU加速度进行平均，获得初始的重力方向
+ * 
+ * @param imuData 
+ * @param currToFirst 
+ * @return Sophus::SE3d 
+ */
 Sophus::SE3d
 GravityInitializer::addMeasure(const IMUData& imuData, const Sophus::SE3d& currToFirst)
 {

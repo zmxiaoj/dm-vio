@@ -72,7 +72,7 @@ boost::mutex FrameShell::shellPoseMutex{};
 
 /**
  * @brief Construct a new Full System:: Full System object
- *        构造函数
+ *        构造函数，初始化FullSystem对象
  * 
  * @param linearizeOperationPassed 
  * @param imuCalibration 
@@ -80,24 +80,29 @@ boost::mutex FrameShell::shellPoseMutex{};
  */
 FullSystem::FullSystem(bool linearizeOperationPassed, const dmvio::IMUCalibration& imuCalibration,
                        dmvio::IMUSettings& imuSettings)
+	// 初始化linearizeOperation，imuIntegration，secondKeyframeDone，gravityInit，shellPoseMutex
     : linearizeOperation(linearizeOperationPassed), imuIntegration(&Hcalib, imuCalibration, imuSettings,
                                                                    linearizeOperation),
                      secondKeyframeDone(false), gravityInit(imuSettings.numMeasurementsGravityInit, imuCalibration),
                      shellPoseMutex(FrameShell::shellPoseMutex)
 {
+	// 标记是否使用IMU
     setting_useGTSAMIntegration = setting_useIMU;
+	// 获取BAGTSAMIntegration对象
     baIntegration = imuIntegration.getBAGTSAMIntegration().get();
 
 	int retstat =0;
+	// 输出日志文件
 	if(setting_logStuff)
 	{
-
+		// 删除并重现创建logs、mats目录
 		retstat += system("rm -rf logs");
 		retstat += system("mkdir logs");
 
 		retstat += system("rm -rf mats");
 		retstat += system("mkdir mats");
 
+		// 创建并打开日志文件
 		calibLog = new std::ofstream();
 		calibLog->open("logs/calibLog.txt", std::ios::trunc | std::ios::out);
 		calibLog->precision(12);
@@ -135,6 +140,7 @@ FullSystem::FullSystem(bool linearizeOperationPassed, const dmvio::IMUCalibratio
 		nullspacesLog->open("logs/nullspacesLog.txt", std::ios::trunc | std::ios::out);
 		nullspacesLog->precision(10);
 	}
+	// 不使用日志文件
 	else
 	{
 		nullspacesLog=0;
@@ -152,13 +158,18 @@ FullSystem::FullSystem(bool linearizeOperationPassed, const dmvio::IMUCalibratio
 
 
 	selectionMap = new float[wG[0]*hG[0]];
-
+	// 创建CoarseDistanceMap对象
 	coarseDistanceMap = new CoarseDistanceMap(wG[0], hG[0]);
+	// 创建CoarseTracker对象
 	coarseTracker = new CoarseTracker(wG[0], hG[0], imuIntegration);
+	// 创建CoarseTracker对象处理新的关键帧
 	coarseTracker_forNewKF = new CoarseTracker(wG[0], hG[0], imuIntegration);
+	// 创建CoarseInitializer对象
 	coarseInitializer = new CoarseInitializer(wG[0], hG[0]);
+	// 创建PixelSelector对象
 	pixelSelector = new PixelSelector(wG[0], hG[0]);
 
+	// 初始化统计数据的变量
 	statistics_lastNumOptIts=0;
 	statistics_numDroppedPoints=0;
 	statistics_numActivatedPoints=0;
@@ -168,26 +179,33 @@ FullSystem::FullSystem(bool linearizeOperationPassed, const dmvio::IMUCalibratio
 	statistics_numMargResFwd = 0;
 	statistics_numMargResBwd = 0;
 
+	// 设置RMSE初值
 	lastCoarseRMSE.setConstant(100);
 
 	currentMinActDist=2;
+	// 标记是否完成初始化
 	initialized=false;
 
-
+	// 创建EnergyFunctional对象
 	ef = new EnergyFunctional(*baIntegration);
 	ef->red = &this->treadReduce;
 
+	// 标记是否跟踪丢失
 	isLost=false;
+	// 表示是否初始化失败
 	initFailed=false;
 
-
+	// 标记是否需要新的关键帧
 	needNewKFAfter = -1;
+	// 标记是否运行mapping线程
 	runMapping=true;
+	// 创建mapping线程运行mappingLoop函数
 	mappingThread = boost::thread(&FullSystem::mappingLoop, this);
+	// 初始化最后一个参考帧ID
 	lastRefStopID=0;
 
 
-
+	// 初始化调试参数
 	minIdJetVisDebug = -1;
 	maxIdJetVisDebug = -1;
 	minIdJetVisTracker = -1;
@@ -890,62 +908,94 @@ void FullSystem::flagPointsForRemoval()
 void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData* imuData, dmvio::GTData* gtData)
 {
     // Measure Time of the time measurement.
+	// 初始化时间测量变量
     dmvio::TimeMeasurement timeMeasurementMeasurement("timeMeasurement");
     dmvio::TimeMeasurement timeMeasurementZero("zero");
     timeMeasurementZero.end();
     timeMeasurementMeasurement.end();
 
     dmvio::TimeMeasurement timeMeasurement("addActiveFrame");
+	// 创建unique_lock对象lock获取mutex对象trackMutex的所有权
+	// 如果trackMutex已经被其他线程锁定，lock将阻塞当前线程直到trackMutex被解锁
+	// 当lock对象被销毁，trackMutex将被解锁
 	boost::unique_lock<boost::mutex> lock(trackMutex);
 
-
+	// 统计创建帧相关对象的时间
 	dmvio::TimeMeasurement measureInit("initObjectsAndMakeImage");
 	// =========================== add into allFrameHistory =========================
+	// 创建FrameHessian对象fh
 	FrameHessian* fh = new FrameHessian();
+	// 创建FrameShell对象shell
 	FrameShell* shell = new FrameShell();
+	// 初始化帧相关变量
+	// camera2world外参
 	shell->camToWorld = SE3(); 		// no lock required, as fh is not used anywhere yet.
+	// 光度仿射变换
 	shell->aff_g2l = AffLight(0,0);
+	// 边缘化标志
     shell->marginalizedAt = shell->id = allFrameHistory.size();
+	// 设置帧时间戳
     shell->timestamp = image->timestamp;
     shell->incoming_id = id;
 	fh->shell = shell;
+	// 将shell添加到allFrameHistory中，allFrameHistory保存所有帧的信息
 	allFrameHistory.push_back(shell);
 
 
     // =========================== make Images / derivatives etc. =========================
+	// 设置帧的曝光时间
 	fh->ab_exposure = image->exposure_time;
+	// **********STEP1:处理图像**********
+	// 设置根据相机内参生成图像金字塔，计算图像梯度
 	fh->makeImages(image->image, &Hcalib);
 
+	// 停止统计创建帧相关对象的时间
     measureInit.end();
 
+	// **********STEP2:初始化**********
+	// 初始化未完成
 	if(!initialized)
 	{
 		// use initializer!
+		// 判断是否是第一帧
 		if(coarseInitializer->frameID<0)	// first frame set. fh is kept by coarseInitializer.
 		{
             // Only in this case no IMU-data is accumulated for the BA as this is the first frame.
-		    dmvio::TimeMeasurement initMeasure("InitializerFirstFrame");
+		    // 由于是第一帧，没有IMU数据
+			dmvio::TimeMeasurement initMeasure("InitializerFirstFrame");
+			// 输入相机内参和fh帧信息，设置初始化第一帧
 			coarseInitializer->setFirst(&Hcalib, fh);
+			// 使用IMU数据
             if(setting_useIMU)
             {
+				// 进行IMU重力方向初始化
                 gravityInit.addMeasure(*imuData, Sophus::SE3d());
             }
+			// 输出系统状态
             for(IOWrap::Output3DWrapper* ow : outputWrapper)
                 ow->publishSystemStatus(dmvio::VISUAL_INIT);
-        }else
+        }
+		else
         {
             dmvio::TimeMeasurement initMeasure("InitializerOtherFrames");
+			// 对图像帧进行跟踪
 			bool initDone = coarseInitializer->trackFrame(fh, outputWrapper);
+			// 使用IMU
 			if(setting_useIMU)
 			{
+				// 将IMU数据添加到BA中
                 imuIntegration.addIMUDataToBA(*imuData);
 				Sophus::SE3 imuToWorld = gravityInit.addMeasure(*imuData, Sophus::SE3d());
+				// 跟踪第一帧成功
 				if(initDone)
 				{
+					// 计算第一帧的位姿 
 					firstPose = imuToWorld * imuIntegration.TS_cam_imu.inverse();
 				}
 			}
-            if (initDone)    // if SNAPPED
+            
+			// 跟踪成功，完成初始化
+			if (initDone)    // if SNAPPED
             {
                 initializeFromInitializer(fh);
                 if(setting_useIMU && linearizeOperation)
@@ -957,26 +1007,34 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
                 for(IOWrap::Output3DWrapper* ow : outputWrapper)
                     ow->publishSystemStatus(dmvio::VISUAL_ONLY);
                 deliverTrackedFrame(fh, true);
-            } else
+            } 
+			// 跟踪失败
+			else
             {
                 // if still initializing
 
                 // Maybe change first frame.
+				// 如果时间间隔大于最大时间间隔，进行全局重置，调整初始化的第一帧
                 double timeBetweenFrames = fh->shell->timestamp - coarseInitializer->firstFrame->shell->timestamp;
                 std::cout << "InitTimeBetweenFrames: " << timeBetweenFrames << std::endl;
                 if(timeBetweenFrames > imuIntegration.getImuSettings().maxTimeBetweenInitFrames)
                 {
                     // Do full reset so that the next frame becomes the first initializer frame.
                     setting_fullResetRequested = true;
-                }else
+                }
+				// 否则，删除当前帧，继续对原初始化第一帧进行跟踪
+				else
                 {
                     fh->shell->poseValid = false;
                     delete fh;
                 }
             }
         }
+		
 		return;
 	}
+	// **********STEP3:进行跟踪**********
+	// 初始化成功，进行跟踪
 	else	// do front-end operation.
 	{
 	    // --------------------------  Coarse tracking (after visual initializer succeeded). --------------------------
@@ -988,9 +1046,11 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
 		if(coarseTracker_forNewKF->refFrameID > coarseTracker->refFrameID)
 		{
             dmvio::TimeMeasurement referenceSwapTime("swapTrackingRef");
+			// 交换参考帧和当前帧的coarseTracker
 			boost::unique_lock<boost::mutex> crlock(coarseTrackerSwapMutex);
 			CoarseTracker* tmp = coarseTracker; coarseTracker=coarseTracker_forNewKF; coarseTracker_forNewKF=tmp;
 
+			// 更新IMU相关信息
 			if(dso::setting_useIMU)
 			{
 			    // BA for new keyframe has finished and we have a new tracking reference.
@@ -1044,6 +1104,8 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
         }
 
         double timeSinceLastKeyframe = fh->shell->timestamp - allKeyFramesHistory.back()->timestamp;
+		
+		// 判断是否插入关键帧 
 		bool needToMakeKF = false;
 		if(setting_keyframesPerSecond > 0)
 		{
@@ -1056,6 +1118,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
 					coarseTracker->lastRef_aff_g2l, fh->shell->aff_g2l);
 
 			// BRIGHTNESS CHECK
+			// 插入关键帧的验证指标
 			needToMakeKF = allFrameHistory.size()== 1 ||
 					setting_kfGlobalWeight*setting_maxShiftWeightT *  sqrtf((double)tres[1]) / (wG[0]+hG[0]) +
 					setting_kfGlobalWeight*setting_maxShiftWeightR *  sqrtf((double)tres[2]) / (wG[0]+hG[0]) +
@@ -1071,6 +1134,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
             }
 
 		}
+		// 是否需要插入关键帧
 		double transNorm = fh->shell->camToTrackingRef.translation().norm() * imuIntegration.getCoarseScale();
 		if(imuIntegration.isCoarseInitialized() && transNorm < setting_forceNoKFTranslationThresh)
         {
@@ -1122,9 +1186,13 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
         for(IOWrap::Output3DWrapper* ow : outputWrapper)
             ow->publishCamPose(fh->shell, &Hcalib);
 
+		// 释放互斥锁对象trackMutex
         lock.unlock();
+		// 更新时间变量
         timeLastStuff.end();
         coarseTrackingTime.end();
+		// **********STEP4:发布帧**********
+		// 把该帧发布
 		deliverTrackedFrame(fh, needToMakeKF);
 		return;
 	}
