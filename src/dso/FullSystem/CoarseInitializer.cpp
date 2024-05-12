@@ -805,21 +805,24 @@ void CoarseInitializer::makeGradients(Eigen::Vector3f** data)
 /**
  * @brief 初始化第一帧
  * 
- * @param HCalib 
- * @param newFrameHessian 
+ * @param HCalib [in]，相机标定参数
+ * @param newFrameHessian [in]，图像帧处理后的对象(包含图像金字塔各层灰度和梯度)
  */
 void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHessian)
 {
-	// 计算图像每层的内参
+	// 计算图像金字塔各层的内参矩阵、逆矩阵
 	makeK(HCalib);
 	firstFrame = newFrameHessian;
 
+	// 创建PixelSelector对象
 	PixelSelector sel(w[0],h[0]);
 
+	// 创建statusMap和statusMapB保存图像像素状态
 	float* statusMap = new float[w[0]*h[0]];
 	bool* statusMapB = new bool[w[0]*h[0]];
 
 	float densities[] = {0.03,0.05,0.15,0.5,1};
+	// 遍历图像金字塔各层
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
 		sel.currentPotential = 3;
@@ -973,6 +976,7 @@ void CoarseInitializer::applyStep(int lvl)
 
 void CoarseInitializer::makeK(CalibHessian* HCalib)
 {
+	// 图像金字塔第0层的宽高和相机内参
 	w[0] = wG[0];
 	h[0] = hG[0];
 
@@ -981,16 +985,20 @@ void CoarseInitializer::makeK(CalibHessian* HCalib)
 	cx[0] = HCalib->cxl();
 	cy[0] = HCalib->cyl();
 
+	// 从第1层开始遍历图像金字塔
 	for (int level = 1; level < pyrLevelsUsed; ++ level)
 	{
+		// 各层图像金字塔的宽高为 第0层/(2^level)
 		w[level] = w[0] >> level;
 		h[level] = h[0] >> level;
+		// fx fy 
 		fx[level] = fx[level-1] * 0.5;
 		fy[level] = fy[level-1] * 0.5;
 		cx[level] = (cx[0] + 0.5) / ((int)1<<level) - 0.5;
 		cy[level] = (cy[0] + 0.5) / ((int)1<<level) - 0.5;
 	}
 
+	// 计算各层图像金字塔相机内参的逆矩阵
 	for (int level = 0; level < pyrLevelsUsed; ++ level)
 	{
 		K[level]  << fx[level], 0.0, cx[level], 0.0, fy[level], cy[level], 0.0, 0.0, 1.0;
@@ -1004,7 +1012,10 @@ void CoarseInitializer::makeK(CalibHessian* HCalib)
 
 
 
-
+/**
+ * @brief 计算各层像素的最近邻点
+ * 
+ */
 void CoarseInitializer::makeNN()
 {
 	const float NNDistFactor=0.05;

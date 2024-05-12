@@ -39,7 +39,12 @@
 namespace dso
 {
 
-
+/**
+ * @brief Construct a new Pixel Selector:: Pixel Selector object
+ *        构造PixelSelector对象，初始化随机模式数组，设置随机种子，初始化梯度直方图和阈值数组
+ * @param w 
+ * @param h 
+ */
 PixelSelector::PixelSelector(int w, int h)
 {
 	randomPattern = new unsigned char[w*h];
