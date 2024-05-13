@@ -87,9 +87,19 @@ PixelSelector::~PixelSelector()
 	delete[] thsSmoothed;
 }
 
+/**
+ * @brief 计算梯度直方图的分位数
+ * 
+ * @param hist [in] 直方图数组
+ * @param below [in] default: 0.5f, 50%分位数的比例
+ * @return int 
+ */
 int computeHistQuantil(int* hist, float below)
 {
+	// hist[0]保存了全部有效pixel的数量
+	// 计算直方图的(50%)分位数，四舍五入取整
 	int th = hist[0]*below+0.5f;
+	// 遍历直方图，找到分位数的位置
 	for(int i=0;i<90;i++)
 	{
 		th -= hist[i+1];
@@ -98,43 +108,70 @@ int computeHistQuantil(int* hist, float below)
 	return 90;
 }
 
-
+/**
+ * @brief 生成梯度直方图
+ * 
+ * @param fh 
+ */
 void PixelSelector::makeHists(const FrameHessian* const fh)
 {
 	gradHistFrame = fh;
+	// 取出第0层图像的梯度平方和(dx^2 + dy^2)
 	float * mapmax0 = fh->absSquaredGrad[0];
 
+	// 取出第0层图像的宽、高
 	int w = wG[0];
 	int h = hG[0];
 
+	// 取出图像宽、高划分的块数
+	// DSO中，使用块的大小为32x32(1024) pixels
+	// DMVIO中，使用块的大小为16x16(256) pixels
 	int w32 = nbW;
 	int h32 = nbH;
 	thsStep = w32;
-
+	
+	// 遍历每个图像块，y为块的行数，x为块的列数(x,y)
 	for(int y=0;y<h32;y++)
 		for(int x=0;x<w32;x++)
 		{
+			// 取出当前块的梯度平方和
 			float* map0 = mapmax0+bW*x+bH*y*w;
 			int* hist0 = gradHist;// + 50*(x+y*w32);
+			// 直方图内存清零并初始化大小为50
+			// hist0[0]统计block内参与直方图统计的有效pixel数量，hist0[1]~hist0[50]统计梯度直方图
 			memset(hist0,0,sizeof(int)*50);
 
-			for(int j=0;j<bH;j++) for(int i=0;i<bW;i++)
-			{
-				int it = i+bW*x;
-				int jt = j+bH*y;
-				if(it>w-2 || jt>h-2 || it<1 || jt<1) continue;
-				int g = sqrtf(map0[i+j*w]);
-				if(g>48) g=48;
-				hist0[g+1]++;
-				hist0[0]++;
-			}
-
+			// 遍历当前block内的每个pixel
+			for(int j=0;j<bH;j++) 
+				for(int i=0;i<bW;i++)
+				{
+					// 当前pixel的索引(i,j)
+					int it = i+bW*x;
+					int jt = j+bH*y;
+					// 当前pixel超出block范围，跳过
+					if(it>w-2 || jt>h-2 || it<1 || jt<1) 
+						continue;
+					// 取出当前pixel的梯度平方和的平方根
+					int g = sqrtf(map0[i+j*w]);
+					// clamp梯度值
+					if(g>48) 
+						g=48;
+					// 更新梯度直方图
+					hist0[g+1]++;
+					// 更新有效pixel数量
+					hist0[0]++;
+				}
+			// 计算当前block的梯度直方图的分位数
+			// 在50%分位数的基础上增加setting_minGradHistAdd(default=7)作为当前block的阈值
 			ths[x+y*w32] = computeHistQuantil(hist0,setting_minGradHistCut) + setting_minGradHistAdd;
 		}
 
+	// 遍历每个图像块，y为块的行数，x为块的列数(x,y)
+	// 用3x3的均值滤波器对阈值进行平滑
 	for(int y=0;y<h32;y++)
 		for(int x=0;x<w32;x++)
 		{
+			// 统计block内的梯度阈值总数和有效block数量
 			float sum=0,num=0;
 			if(x>0)
 			{
@@ -157,12 +194,19 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
 			thsSmoothed[x+y*w32] = (sum/num) * (sum/num);
 
 		}
-
-
-
-
-
 }
+
+/**
+ * @brief 对第0层提取特征像素
+ * 
+ * @param fh FrameHessian对象
+ * @param map_out 输出的特征像素图
+ * @param density 特征像素的密度
+ * @param recursionsLeft 最大递归次数
+ * @param plot 画图
+ * @param thFactor 阈值因子
+ * @return int 
+ */
 int PixelSelector::makeMaps(
 		const FrameHessian* const fh,
 		float* map_out, float density, int recursionsLeft, bool plot, float thFactor)
@@ -204,10 +248,14 @@ int PixelSelector::makeMaps(
 		// the number of selected pixels behaves approximately as
 		// K / (pot+1)^2, where K is a scene-dependent constant.
 		// we will allow sub-selecting pixels by up to a quotia of 0.25, otherwise we will re-select.
+		// 像素选择的数量大约为K/(pot+1)^2，其中K是一个与场景相关的常数
 
-		if(fh != gradHistFrame) makeHists(fh);
+		// 没有计算直方图, 以及选点的阈值, 生成直方图和阈值
+		if(fh != gradHistFrame) 
+			makeHists(fh);
 
 		// select!
+		// 选择特征像素
 		Eigen::Vector3i n = this->select(fh, map_out,currentPotential, thFactor);
 
 		// sub-select!
@@ -215,6 +263,7 @@ int PixelSelector::makeMaps(
 		quotia = numWant / numHave;
 
 		// by default we want to over-sample by 40% just to be sure.
+		// 默认进行40%的过采样，确保有足够的特征点
 		float K = numHave * (currentPotential+1) * (currentPotential+1);
 		idealPotential = sqrtf(K/numWant)-1;	// round down.
 		if(idealPotential<1) idealPotential=1;

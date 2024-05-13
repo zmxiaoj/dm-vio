@@ -821,65 +821,74 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 	float* statusMap = new float[w[0]*h[0]];
 	bool* statusMapB = new bool[w[0]*h[0]];
 
+	// 不同层取得的像素点密度
 	float densities[] = {0.03,0.05,0.15,0.5,1};
 	// 遍历图像金字塔各层
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
 		sel.currentPotential = 3;
+		// 选取的像素数目
 		int npts;
 		if(lvl == 0)
+			// 第0层提取特征像素
 			npts = sel.makeMaps(firstFrame, statusMap,densities[lvl]*w[0]*h[0],1,false,2);
 		else
+			// 其他层提取特征像素
 			npts = makePixelStatus(firstFrame->dIp[lvl], statusMapB, w[lvl], h[lvl], densities[lvl]*w[0]*h[0]);
 
 
-
-		if(points[lvl] != 0) delete[] points[lvl];
+		// 删除原有points[lvl]指向的内存空间，重新分配内存
+		if(points[lvl] != 0) 
+			delete[] points[lvl];
 		points[lvl] = new Pnt[npts];
 
 		// set idepth map to initially 1 everywhere.
 		int wl = w[lvl], hl = h[lvl];
 		Pnt* pl = points[lvl];
 		int nl = 0;
+		// 遍历图像金字塔各层的像素点
 		for(int y=patternPadding+1;y<hl-patternPadding-2;y++)
-		for(int x=patternPadding+1;x<wl-patternPadding-2;x++)
 		{
-			//if(x==2) printf("y=%d!\n",y);
-			if((lvl!=0 && statusMapB[x+y*wl]) || (lvl==0 && statusMap[x+y*wl] != 0))
+			for(int x=patternPadding+1;x<wl-patternPadding-2;x++)
 			{
-				//assert(patternNum==9);
-				pl[nl].u = x+0.1;
-				pl[nl].v = y+0.1;
-				pl[nl].idepth = 1;
-				pl[nl].iR = 1;
-				pl[nl].isGood=true;
-				pl[nl].energy.setZero();
-				pl[nl].lastHessian=0;
-				pl[nl].lastHessian_new=0;
-				pl[nl].my_type= (lvl!=0) ? 1 : statusMap[x+y*wl];
-
-				Eigen::Vector3f* cpt = firstFrame->dIp[lvl] + x + y*w[lvl];
-				float sumGrad2=0;
-				for(int idx=0;idx<patternNum;idx++)
+				//if(x==2) printf("y=%d!\n",y);
+				if((lvl!=0 && statusMapB[x+y*wl]) || (lvl==0 && statusMap[x+y*wl] != 0))
 				{
-					int dx = patternP[idx][0];
-					int dy = patternP[idx][1];
-					float absgrad = cpt[dx + dy*w[lvl]].tail<2>().squaredNorm();
-					sumGrad2 += absgrad;
+					//assert(patternNum==9);
+					pl[nl].u = x+0.1;
+					pl[nl].v = y+0.1;
+					pl[nl].idepth = 1;
+					pl[nl].iR = 1;
+					pl[nl].isGood=true;
+					pl[nl].energy.setZero();
+					pl[nl].lastHessian=0;
+					pl[nl].lastHessian_new=0;
+					pl[nl].my_type= (lvl!=0) ? 1 : statusMap[x+y*wl];
+
+					Eigen::Vector3f* cpt = firstFrame->dIp[lvl] + x + y*w[lvl];
+					float sumGrad2=0;
+					for(int idx=0;idx<patternNum;idx++)
+					{
+						int dx = patternP[idx][0];
+						int dy = patternP[idx][1];
+						float absgrad = cpt[dx + dy*w[lvl]].tail<2>().squaredNorm();
+						sumGrad2 += absgrad;
+					}
+
+	//				float gth = setting_outlierTH * (sqrtf(sumGrad2)+setting_outlierTHSumComponent);
+	//				pl[nl].outlierTH = patternNum*gth*gth;
+	//
+
+					pl[nl].outlierTH = patternNum*setting_outlierTH;
+
+
+
+					nl++;
+					assert(nl <= npts);
 				}
-
-//				float gth = setting_outlierTH * (sqrtf(sumGrad2)+setting_outlierTHSumComponent);
-//				pl[nl].outlierTH = patternNum*gth*gth;
-//
-
-				pl[nl].outlierTH = patternNum*setting_outlierTH;
-
-
-
-				nl++;
-				assert(nl <= npts);
 			}
 		}
+		
 
 
 		numPoints[lvl]=nl;
@@ -974,6 +983,11 @@ void CoarseInitializer::applyStep(int lvl)
 	std::swap<Vec10f*>(JbBuffer, JbBuffer_new);
 }
 
+/**
+ * @brief 计算图像金字塔各层的内参矩阵和逆矩阵
+ * 
+ * @param HCalib 
+ */
 void CoarseInitializer::makeK(CalibHessian* HCalib)
 {
 	// 图像金字塔第0层的宽高和相机内参
@@ -1002,6 +1016,7 @@ void CoarseInitializer::makeK(CalibHessian* HCalib)
 	for (int level = 0; level < pyrLevelsUsed; ++ level)
 	{
 		K[level]  << fx[level], 0.0, cx[level], 0.0, fy[level], cy[level], 0.0, 0.0, 1.0;
+		// K^-1 = [fx^-1 0 -cx*fx^-1; 0 fy^-1 -cy*fy^-1; 0 0 1]
 		Ki[level] = K[level].inverse();
 		fxi[level] = Ki[level](0,0);
 		fyi[level] = Ki[level](1,1);
