@@ -154,8 +154,10 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
 		int wl = wG[lvl], hl = hG[lvl];
+		// 获取dIp[lvl]的指针，保存当前层金字塔的像素、水平梯度(dx)、垂直梯度(dy)
 		Eigen::Vector3f* dI_l = dIp[lvl];
 
+		// 获取absSquaredGrad[lvl]的指针，保存当前层金字塔的像素梯度平方
 		float* dabs_l = absSquaredGrad[lvl];
 		// 当前金字塔大于0层，计算像素值
 		if(lvl>0)
