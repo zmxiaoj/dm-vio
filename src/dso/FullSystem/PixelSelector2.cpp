@@ -48,6 +48,7 @@ namespace dso
 PixelSelector::PixelSelector(int w, int h)
 {
 	randomPattern = new unsigned char[w*h];
+	// 设置随机种子，希望系统是确定性的
 	std::srand(3141592);	// want to be deterministic.
 	for(int i=0;i<w*h;i++) randomPattern[i] = rand() & 0xFF;
 
@@ -55,6 +56,7 @@ PixelSelector::PixelSelector(int w, int h)
 
 	// We create 32 blocks in width dimension, and adjust the number of blocks for the height accordingly.
     // Always use block size of 16.
+	// 使用16*16的块，计算宽、高方向的块数
     bW = 16;
     bH = 16;
     nbW = w / bW;
@@ -67,7 +69,7 @@ PixelSelector::PixelSelector(int w, int h)
 
     std::cout << "PixelSelector: Using block sizes: " << bW << ", " << bH << '\n';
 
-	// 初始化数组用于存储梯度直方图和阈值
+	// 初始化数组用于存储梯度直方图、阈值、平滑后的阈值
 	gradHist = new int[100*(1+nbW)*(1+nbH)];
 	ths = new float[(nbW)*(nbH)+100];
 	thsSmoothed = new float[(nbW)*(nbH)+100];
