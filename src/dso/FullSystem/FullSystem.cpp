@@ -905,6 +905,14 @@ void FullSystem::flagPointsForRemoval()
 }
 
 // The function is passed the IMU-data from the previous frame until the current frame.
+/**
+ * @brief 系统的主要处理函数，添加新帧
+ * 
+ * @param image 标定后的辐照度和曝光时间
+ * @param id 
+ * @param imuData imu数据
+ * @param gtData 
+ */
 void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData* imuData, dmvio::GTData* gtData)
 {
     // Measure Time of the time measurement.
@@ -923,9 +931,10 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
 	// 统计创建帧相关对象的时间
 	dmvio::TimeMeasurement measureInit("initObjectsAndMakeImage");
 	// =========================== add into allFrameHistory =========================
-	// 创建FrameHessian对象fh
+	
+	// 创建FrameHessian对象fh，保存帧的图像信息
 	FrameHessian* fh = new FrameHessian();
-	// 创建FrameShell对象shell
+	// 创建FrameShell对象shell，保存帧的位姿信息，是FrameHessian的成员变量
 	FrameShell* shell = new FrameShell();
 	// 初始化帧相关变量
 	// camera2world外参
