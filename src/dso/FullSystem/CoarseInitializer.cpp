@@ -82,16 +82,24 @@ CoarseInitializer::~CoarseInitializer()
 }
 
 
+/**
+ * @brief 
+ * 
+ * @param newFrameHessian [in] FrameHessian对象
+ * @param wraps [in&out] 输出对象
+ * @return bool 是否跟踪成功
+ */
 bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IOWrap::Output3DWrapper*> &wraps)
 {
 	newFrame = newFrameHessian;
 
+	// 显示当前帧图像
     for(IOWrap::Output3DWrapper* ow : wraps)
         ow->pushLiveFrame(newFrameHessian);
 
 	int maxIterations[] = {5,5,10,30,50};
 
-
+	// 初始化参数
 	alphaK = 2.5*2.5;//*freeDebugParam1*freeDebugParam1;
 	alphaW = 150*150;//*freeDebugParam2*freeDebugParam2;
 	regWeight = 0.8;//*freeDebugParam4;
@@ -818,10 +826,12 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 	PixelSelector sel(w[0],h[0]);
 
 	// 创建statusMap和statusMapB保存图像像素状态
+	// statusMap保存第0层的像素状态 [0, 1, 2, 4] 0-不是特征像素，1-第0层特征像素，2-第1层特征像素，4-第2层特征像素
 	float* statusMap = new float[w[0]*h[0]];
+	// statusMapB保存其他层的像素状态 [false, true]
 	bool* statusMapB = new bool[w[0]*h[0]];
 
-	// 不同层取得的像素点密度
+	// 不同层取得的像素点密度 [0, 1, 2, 3, 4]
 	float densities[] = {0.03,0.05,0.15,0.5,1};
 	// 遍历图像金字塔各层
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
@@ -844,29 +854,37 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 
 		// set idepth map to initially 1 everywhere.
 		int wl = w[lvl], hl = h[lvl];
+		// 获取Pnt对象指针
 		Pnt* pl = points[lvl];
+		// 对应特征像素的索引
 		int nl = 0;
-		// 遍历图像金字塔各层的像素点
+		// 遍历图像金字塔各层的像素点，留出patternPadding边界，borderSize=2
 		for(int y=patternPadding+1;y<hl-patternPadding-2;y++)
 		{
 			for(int x=patternPadding+1;x<wl-patternPadding-2;x++)
 			{
 				//if(x==2) printf("y=%d!\n",y);
+				// 如果是特征像素
 				if((lvl!=0 && statusMapB[x+y*wl]) || (lvl==0 && statusMap[x+y*wl] != 0))
 				{
 					//assert(patternNum==9);
+					// 初始化Pnt对象
 					pl[nl].u = x+0.1;
 					pl[nl].v = y+0.1;
+					// 初始化逆深度为1
 					pl[nl].idepth = 1;
 					pl[nl].iR = 1;
 					pl[nl].isGood=true;
 					pl[nl].energy.setZero();
 					pl[nl].lastHessian=0;
 					pl[nl].lastHessian_new=0;
+					// 初始化特征像素类型
 					pl[nl].my_type= (lvl!=0) ? 1 : statusMap[x+y*wl];
 
+					// 当前像素的像素、水平梯度、垂直梯度
 					Eigen::Vector3f* cpt = firstFrame->dIp[lvl] + x + y*w[lvl];
 					float sumGrad2=0;
+					// 统计Pattern中的像素梯度平方和，patternNum=8
 					for(int idx=0;idx<patternNum;idx++)
 					{
 						int dx = patternP[idx][0];
@@ -879,27 +897,31 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 	//				pl[nl].outlierTH = patternNum*gth*gth;
 	//
 
+					// 设置外点阈值
 					pl[nl].outlierTH = patternNum*setting_outlierTH;
 
 
-
+					// 特征像素索引增加
 					nl++;
 					assert(nl <= npts);
 				}
 			}
 		}
 		
-
-
+		// 统计当前层特征像素数目
 		numPoints[lvl]=nl;
 	}
 	delete[] statusMap;
 	delete[] statusMapB;
-
+	
+	// 计算点的最近邻和父点
 	makeNN();
 
+	// 参数初始化
 	thisToNext=SE3();
+	// 标记未收敛，初始化未完成
 	snapped = false;
+	// 初始化帧ID
 	frameID = snappedAt = 0;
 
 	for(int i=0;i<pyrLevelsUsed;i++)
@@ -1028,72 +1050,109 @@ void CoarseInitializer::makeK(CalibHessian* HCalib)
 
 
 /**
- * @brief 计算各层像素的最近邻点
+ * @brief 计算各层像素的最近邻和父点
  * 
  */
 void CoarseInitializer::makeNN()
 {
+	// 最近邻距离衰减因子
 	const float NNDistFactor=0.05;
 
+	// KDTreeSingleIndexAdaptor模板类用于创建KDTree对象
+	// 第一个参数为距离度量函数对象(对于FLANNPointcloud类型点云计算L2范数)
+	// 第二个是点云类型, 第三个是维数
 	typedef nanoflann::KDTreeSingleIndexAdaptor<
 			nanoflann::L2_Simple_Adaptor<float, FLANNPointcloud> ,
 			FLANNPointcloud,2> KDTree;
 
 	// build indices
+	// 为每一层的点云数据创建FLANNPointcloud对象和KDTree对象
 	FLANNPointcloud pcs[PYR_LEVELS];
 	KDTree* indexes[PYR_LEVELS];
+	// 遍历图像金字塔各层
 	for(int i=0;i<pyrLevelsUsed;i++)
 	{
+		// 创建FLANNPointcloud对象
 		pcs[i] = FLANNPointcloud(numPoints[i], points[i]);
+		// 创建KDTree对象
+		// 参数1：维数；参数2：FLANNPointcloud对象；参数3：叶节点中的最大点数(参数小使增加树的深度，增加查询时间，减少内存使用)
 		indexes[i] = new KDTree(2, pcs[i], nanoflann::KDTreeSingleIndexAdaptorParams(5) );
+		// 构建KDTree的索引
 		indexes[i]->buildIndex();
 	}
 
+	// 最近邻数目
 	const int nn=10;
 
 	// find NN & parents
+	// 查找最近邻和父点
+	// 遍历图像金字塔各层
 	for(int lvl=0;lvl<pyrLevelsUsed;lvl++)
 	{
+		// 特征像素数组和当前层特征像素数目
 		Pnt* pts = points[lvl];
 		int npts = numPoints[lvl];
 
+		// 搜索到的最近邻点索引和距离
 		int ret_index[nn];
 		float ret_dist[nn];
+		// 搜索最近邻的nn个点
 		nanoflann::KNNResultSet<float, int, int> resultSet(nn);
+		// 搜索最近邻的1个点
 		nanoflann::KNNResultSet<float, int, int> resultSet1(1);
 
+		// 遍历当前层特征像素
 		for(int i=0;i<npts;i++)
 		{
 			//resultSet.init(pts[i].neighbours, pts[i].neighboursDist );
+			// 初始化resultSet
 			resultSet.init(ret_index, ret_dist);
+			// 当前特征像素的坐标
 			Vec2f pt = Vec2f(pts[i].u,pts[i].v);
+			// 查找最近邻
 			indexes[lvl]->findNeighbors(resultSet, (float*)&pt, nanoflann::SearchParams());
+			// 表示当前特征像素的邻居数目
 			int myidx=0;
+			// 表示当前特征像素的最近邻指数衰减距离的和
 			float sumDF = 0;
+			// 遍历nn个最近邻
 			for(int k=0;k<nn;k++)
 			{
+				// 将第k最近邻索引存储到当前特征像素的邻居数组中
 				pts[i].neighbours[myidx]=ret_index[k];
+				// 计算最近邻的指数衰减距离
 				float df = expf(-ret_dist[k]*NNDistFactor);
+				// 累加指数衰减距离
 				sumDF += df;
+				// 将最近邻的指数衰减距离存储到当前特征像素的邻居距离数组中
 				pts[i].neighboursDist[myidx]=df;
 				assert(ret_index[k]>=0 && ret_index[k] < npts);
 				myidx++;
 			}
+			// 将最近邻的指数衰减距离归一化到[0,10]
 			for(int k=0;k<nn;k++)
 				pts[i].neighboursDist[k] *= 10/sumDF;
 
 
+			// 在更高层图像中找到父节点
 			if(lvl < pyrLevelsUsed-1 )
 			{
+				// 初始化resultSet1
 				resultSet1.init(ret_index, ret_dist);
+				// 计算当前特征像素的坐标在更高层图像中的坐标
+				// 高层坐标[x, y]与底层坐标[2x+1/2, 2y+1/2]的对应关系
 				pt = pt*0.5f-Vec2f(0.25f,0.25f);
+				// 找到1个最近邻
 				indexes[lvl+1]->findNeighbors(resultSet1, (float*)&pt, nanoflann::SearchParams());
 
+				// 将最近邻的索引存储到当前特征像素的父节点数组中
 				pts[i].parent = ret_index[0];
+				// 计算最近邻的指数衰减距离
 				pts[i].parentDist = expf(-ret_dist[0]*NNDistFactor);
 
 				assert(ret_index[0]>=0 && ret_index[0] < numPoints[lvl+1]);
 			}
+			// 如果是最高层图像，则父节点为-1
 			else
 			{
 				pts[i].parent = -1;
@@ -1105,7 +1164,7 @@ void CoarseInitializer::makeNN()
 
 
 	// done.
-
+	// 清除内存
 	for(int i=0;i<pyrLevelsUsed;i++)
 		delete indexes[i];
 }
