@@ -69,7 +69,7 @@ PixelSelector::PixelSelector(int w, int h)
 
     std::cout << "PixelSelector: Using block sizes: " << bW << ", " << bH << '\n';
 
-	// 初始化数组用于存储梯度直方图、阈值、平滑后的阈值
+	// 初始化数组用于存储梯度直方图、阈值、平滑后的阈值(3x3block内阈值的均值平方)
 	gradHist = new int[100*(1+nbW)*(1+nbH)];
 	ths = new float[(nbW)*(nbH)+100];
 	thsSmoothed = new float[(nbW)*(nbH)+100];
@@ -167,7 +167,7 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
 		}
 
 	// 遍历每个图像块，y为块的行数，x为块的列数(x,y)
-	// 用3x3的均值滤波器对阈值进行平滑
+	// 用3x3范围的block均值滤波器对阈值进行平滑
 	for(int y=0;y<h32;y++)
 		for(int x=0;x<w32;x++)
 		{
@@ -191,6 +191,7 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
 			if(y<h32-1) {num++; 	sum+=ths[x+(y+1)*w32];}
 			num++; sum+=ths[x+y*w32];
 
+			// 计算阈值在3x3block内的均值平方
 			thsSmoothed[x+y*w32] = (sum/num) * (sum/num);
 
 		}
@@ -255,8 +256,8 @@ int PixelSelector::makeMaps(
 			makeHists(fh);
 
 		// select!
-		// 选择特征像素
-		Eigen::Vector3i n = this->select(fh, map_out,currentPotential, thFactor);
+		// 选择符合条件的特征像素
+		Eigen::Vector3i n = this->select(fh, map_out, currentPotential, thFactor);
 
 		// sub-select!
 		numHave = n[0]+n[1]+n[2];
@@ -362,7 +363,6 @@ int PixelSelector::makeMaps(
 
 	return numHaveSub;
 }
-
 
 
 Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
