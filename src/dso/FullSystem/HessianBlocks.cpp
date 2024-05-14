@@ -170,7 +170,8 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 			for(int y=0;y<hl;y++)
 				for(int x=0;x<wl;x++)
 				{
-					// 取上一层金字塔的像素值，进行双线性插值
+					// 取上一层金字塔的像素值，进行降采样
+					// 当前层像素(x, y) 对应上一层金字塔的像素(2x, 2y),(2x+1, 2y),(2x, 2y+1),(2x+1, 2y+1)
 					dI_l[x + y*wl][0] = 0.25f * (dI_lm[2*x   + 2*y*wlm1][0] +
 												dI_lm[2*x+1 + 2*y*wlm1][0] +
 												dI_lm[2*x   + 2*y*wlm1+wlm1][0] +
