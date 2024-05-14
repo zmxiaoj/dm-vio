@@ -105,11 +105,15 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 	regWeight = 0.8;//*freeDebugParam4;
 	couplingWeight = 1;//*freeDebugParam5;
 
+	// 初始化未完成
 	if(!snapped)
 	{
+		// 初始化位姿
 		thisToNext.translation().setZero();
+		// 遍历图像金字塔
 		for(int lvl=0;lvl<pyrLevelsUsed;lvl++)
 		{
+			// 初始化全部特征像素
 			int npts = numPoints[lvl];
 			Pnt* ptsl = points[lvl];
 			for(int i=0;i<npts;i++)
@@ -126,11 +130,15 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 
 	AffLight refToNew_aff_current = thisToNext_aff;
 
+	// 如果第一帧和当前帧的曝光时间都大于0，估计仿射变换初值
 	if(firstFrame->ab_exposure>0 && newFrame->ab_exposure>0)
+		// 仿射参数初始化结果，a为曝光时间比值的对数，b为0
 		refToNew_aff_current = AffLight(logf(newFrame->ab_exposure /  firstFrame->ab_exposure),0); // coarse approximation.
 
 
 	Vec3f latestRes = Vec3f::Zero();
+	// 自顶向下遍历图像金字塔
+	// TODO 
 	for(int lvl=pyrLevelsUsed-1; lvl>=0; lvl--)
 	{
 

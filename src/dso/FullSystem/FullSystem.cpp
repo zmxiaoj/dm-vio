@@ -977,7 +977,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
 			// 使用IMU数据
             if(setting_useIMU)
             {
-				// 进行IMU重力方向初始化
+				// TODO 进行IMU重力方向初始化
                 gravityInit.addMeasure(*imuData, Sophus::SE3d());
             }
 			// 输出系统状态
