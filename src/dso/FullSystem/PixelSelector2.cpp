@@ -205,7 +205,7 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
  * @param density 特征像素的密度
  * @param recursionsLeft 最大递归次数
  * @param plot 画图
- * @param thFactor 阈值因子
+ * @param thFactor 阈值因子 default=2
  * @return int 
  */
 int PixelSelector::makeMaps(
@@ -365,101 +365,165 @@ int PixelSelector::makeMaps(
 }
 
 
+/**
+ * @brief 在当前帧上选择符合条件的像素
+ * 
+ * @param fh FrameHessian对象
+ * @param map_out 筛选出的像素图
+ * @param pot 选点的范围大小(pot内选一个点) default=3
+ * @param thFactor 阈值因子 default=2
+ * @return Eigen::Vector3i [out] 不同金字塔层级选择的特征像素数量
+ */
 Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 		float* map_out, int pot, float thFactor)
 {
 
+	// const 在*左, 指针内容不可改, 在*右指针不可改
+	// 等价const Eigen::Vector3f * const
+	// 取出第0层图像像素、水平梯度dx、垂直梯度dy
 	Eigen::Vector3f const * const map0 = fh->dI;
 
+	// 取出第0、1、2层图像的梯度平方和(dx^2 + dy^2)
 	float * mapmax0 = fh->absSquaredGrad[0];
 	float * mapmax1 = fh->absSquaredGrad[1];
 	float * mapmax2 = fh->absSquaredGrad[2];
 
-
+	// 不同层的图像大小
 	int w = wG[0];
 	int w1 = wG[1];
 	int w2 = wG[2];
 	int h = hG[0];
 
-
+	// 选取16个方向
 	const Vec2f directions[16] = {
+			// 90.0'
 	         Vec2f(0,    1.0000),
+			// 67.5'
 	         Vec2f(0.3827,    0.9239),
+			// 78.75'
 	         Vec2f(0.1951,    0.9808),
+			// 22.5'
 	         Vec2f(0.9239,    0.3827),
+			// 45.0'
 	         Vec2f(0.7071,    0.7071),
+			// -67.5'
 	         Vec2f(0.3827,   -0.9239),
+			// 33.75'
 	         Vec2f(0.8315,    0.5556),
+			// -33.75'
 	         Vec2f(0.8315,   -0.5556),
+			// -56.25'
 	         Vec2f(0.5556,   -0.8315),
+			// 11.25'
 	         Vec2f(0.9808,    0.1951),
+			// -22.5'
 	         Vec2f(0.9239,   -0.3827),
+			// -45.0'
 	         Vec2f(0.7071,   -0.7071),
+			// 56.25'
 	         Vec2f(0.5556,    0.8315),
-	         Vec2f(0.9808,   -0.1951),
+	        // -11.25'
+			 Vec2f(0.9808,   -0.1951),
+			// 0'
 	         Vec2f(1.0000,    0.0000),
+			// -78.75'
 	         Vec2f(0.1951,   -0.9808)};
 
+	// 分配map_out内存
 	memset(map_out,0,w*h*sizeof(PixelSelectorStatus));
 
-
-
+	// 金字塔层级的阈值下降权重
+	// 第1层，default=0.75f
 	float dw1 = setting_gradDownweightPerLevel;
+	// 第2层
 	float dw2 = dw1*dw1;
 
-
+	// 统计不同金字塔层级下满足条件的特征像素数量
 	int n3=0, n2=0, n4=0;
+	// 遍历每个4potx4pot pixel块
 	for(int y4=0;y4<h;y4+=(4*pot)) for(int x4=0;x4<w;x4+=(4*pot))
 	{
+		// 保证4potx4pot pixel块在图像范围内
 		int my3 = std::min((4*pot), h-y4);
 		int mx3 = std::min((4*pot), w-x4);
+		// 记录最佳4potx4pot索引和值
 		int bestIdx4=-1; float bestVal4=0;
+		// 取低4位保证索引范围为[0,15]，随机选择directions中的一个方向
 		Vec2f dir4 = directions[randomPattern[n2] & 0xF];
+		// 遍历4potx4pot pixel块内的每个2potx2pot pixel块
 		for(int y3=0;y3<my3;y3+=(2*pot)) for(int x3=0;x3<mx3;x3+=(2*pot))
 		{
+			// 计算2potx2pot pixel块的坐标
 			int x34 = x3+x4;
 			int y34 = y3+y4;
+			// 保证2potx2pot pixel块在图像范围内
 			int my2 = std::min((2*pot), h-y34);
 			int mx2 = std::min((2*pot), w-x34);
+			// 记录最佳2potx2pot索引和值
 			int bestIdx3=-1; float bestVal3=0;
+			// 随机选择directions中的一个方向
 			Vec2f dir3 = directions[randomPattern[n2] & 0xF];
+			// 遍历2potx2pot pixel块内的每个1potx1pot pixel块
 			for(int y2=0;y2<my2;y2+=pot) for(int x2=0;x2<mx2;x2+=pot)
 			{
+				// 计算1potx1pot pixel块的坐标
 				int x234 = x2+x34;
 				int y234 = y2+y34;
+				// 保证1potx1pot pixel块在图像范围内
 				int my1 = std::min(pot, h-y234);
 				int mx1 = std::min(pot, w-x234);
+				// 记录最佳1potx1pot索引和值
 				int bestIdx2=-1; float bestVal2=0;
+				// 随机选择directions中的一个方向
 				Vec2f dir2 = directions[randomPattern[n2] & 0xF];
+				// 遍历1potx1pot pixel块内的每个pixel
 				for(int y1=0;y1<my1;y1+=1) for(int x1=0;x1<mx1;x1+=1)
 				{
 					assert(x1+x234 < w);
 					assert(y1+y234 < h);
+					// 计算当前pixel的索引
 					int idx = x1+x234 + w*(y1+y234);
+					// 计算当前pixel的坐标
 					int xf = x1+x234;
 					int yf = y1+y234;
 
-					if(xf<4 || xf>=w-5 || yf<4 || yf>h-4) continue;
+					// 保证当前pixel在图像范围内
+					if(xf<4 || xf>=w-5 || yf<4 || yf>h-4) 
+						continue;
 
-
+					// 获取当前pixel的阈值
+					// 第0层
                     float pixelTH0 = thsSmoothed[xf / bW + (yf / bH) * thsStep];
+					// 计算按权重降低后的阈值
+					// 第1层
 					float pixelTH1 = pixelTH0*dw1;
+					// 第2层
 					float pixelTH2 = pixelTH1*dw2;
 
-
+					// 获取当前pixel的梯度平方和
 					float ag0 = mapmax0[idx];
+					// 当前pixel的梯度平方和大于阈值
 					if(ag0 > pixelTH0*thFactor)
 					{
+						// 获取当前pixel的水平、垂直梯度 dx, dy
 						Vec2f ag0d = map0[idx].tail<2>();
+						// 计算梯度与方向的点积
+						// |[dx dy]*[dir_x dir_y]|
 						float dirNorm = fabsf((float)(ag0d.dot(dir2)));
+						// 判断是否选择方向分布进行判断
 						if(!setting_selectDirectionDistribution) dirNorm = ag0;
 
+						// 更新1potx1pot最佳值和索引
+						// 并标记2potx2pot和4potx4pot的索引
 						if(dirNorm > bestVal2)
 						{ bestVal2 = dirNorm; bestIdx2 = idx; bestIdx3 = -2; bestIdx4 = -2;}
 					}
+					// 如果1potx1pot内已经找到最佳值，跳过
 					if(bestIdx3==-2) continue;
 
+					// 取出当前pixel对应第1层的梯度平方和
 					float ag1 = mapmax1[(int)(xf*0.5f+0.25f) + (int)(yf*0.5f+0.25f)*w1];
+					// 当前pixel的梯度平方和大于阈值
 					if(ag1 > pixelTH1*thFactor)
 					{
 						Vec2f ag0d = map0[idx].tail<2>();
@@ -469,8 +533,10 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 						if(dirNorm > bestVal3)
 						{ bestVal3 = dirNorm; bestIdx3 = idx; bestIdx4 = -2;}
 					}
+					// 如果2potx2pot内已经找到最佳值，跳过
 					if(bestIdx4==-2) continue;
 
+					// 取出当前pixel对应第2层的梯度平方和
 					float ag2 = mapmax2[(int)(xf*0.25f+0.125) + (int)(yf*0.25f+0.125)*w2];
 					if(ag2 > pixelTH2*thFactor)
 					{
@@ -482,15 +548,18 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 						{ bestVal4 = dirNorm; bestIdx4 = idx; }
 					}
 				}
-
+				// 如果1potx1pot内找到最佳值，标记2potx2pot和4potx4pot的索引
 				if(bestIdx2>0)
 				{
+					// 记录最佳值像素属于的金字塔层级
 					map_out[bestIdx2] = 1;
+					// 设置2potx2pot的最佳值
 					bestVal3 = 1e10;
+					// 更新1potx1pot特征像素数量
 					n2++;
 				}
 			}
-
+			// 如果2potx2pot内找到最佳值，标记4potx4pot的索引
 			if(bestIdx3>0)
 			{
 				map_out[bestIdx3] = 2;
@@ -506,7 +575,7 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 		}
 	}
 
-
+	// 返回在1potx1pot、2potx2pot、4potx4pot(0、1、2层)内找到的特征像素数量
 	return Eigen::Vector3i(n2,n3,n4);
 }
 
