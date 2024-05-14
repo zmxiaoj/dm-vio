@@ -203,10 +203,10 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
  * @param fh FrameHessian对象
  * @param map_out 输出的特征像素图
  * @param density 特征像素的密度
- * @param recursionsLeft 最大递归次数
+ * @param recursionsLeft 剩余递归次数 default=1
  * @param plot 画图
  * @param thFactor 阈值因子 default=2
- * @return int 
+ * @return int [out]返回提取的特征像素数量
  */
 int PixelSelector::makeMaps(
 		const FrameHessian* const fh,
@@ -260,19 +260,26 @@ int PixelSelector::makeMaps(
 		Eigen::Vector3i n = this->select(fh, map_out, currentPotential, thFactor);
 
 		// sub-select!
+		// 已选择的特征像素总数
 		numHave = n[0]+n[1]+n[2];
+		// 需要特征像素数量与现有特征像素数量的比值
 		quotia = numWant / numHave;
 
 		// by default we want to over-sample by 40% just to be sure.
 		// 默认进行40%的过采样，确保有足够的特征点
+		// 根据现有特征像素数量计算K，K=numHave*(pot+1)^2
 		float K = numHave * (currentPotential+1) * (currentPotential+1);
+		// 根据需要特征像素数量计算理想的potential 
 		idealPotential = sqrtf(K/numWant)-1;	// round down.
+		// clamp理想的pot
 		if(idealPotential<1) idealPotential=1;
 
+		// 剩余递归次数大于0，且需要特征像素数量大于现有特征像素数量的1.25倍，且当前potential大于1
 		if( recursionsLeft>0 && quotia > 1.25 && currentPotential>1)
 		{
 			//re-sample to get more points!
 			// potential needs to be smaller
+			// 降低potential，选择更多的特征像素
 			if(idealPotential>=currentPotential)
 				idealPotential = currentPotential-1;
 
@@ -284,10 +291,11 @@ int PixelSelector::makeMaps(
 			currentPotential = idealPotential;
 			return makeMaps(fh,map_out, density, recursionsLeft-1, plot,thFactor);
 		}
+		// 剩余递归次数大于0，且需要特征像素数量小于现有特征像素数量0.25倍
 		else if(recursionsLeft>0 && quotia < 0.25)
 		{
 			// re-sample to get less points!
-
+			// 提高potential，选择更少的特征像素
 			if(idealPotential<=currentPotential)
 				idealPotential = currentPotential+1;
 
@@ -302,14 +310,18 @@ int PixelSelector::makeMaps(
 		}
 	}
 
+	// 再次减少采样点个数，随机删除一部分点
 	int numHaveSub = numHave;
+	// 需要特征像素数量小于现有特征像素数量的0.95倍
 	if(quotia < 0.95)
 	{
 		int wh=wG[0]*hG[0];
 		int rn=0;
 		unsigned char charTH = 255*quotia;
+		// 遍历像素
 		for(int i=0;i<wh;i++)
 		{
+			// 删除一部分特征像素
 			if(map_out[i] != 0)
 			{
 				if(randomPattern[rn] > charTH )
@@ -328,9 +340,10 @@ int PixelSelector::makeMaps(
 //			currentPotential,
 //			idealPotential,
 //			100*numHaveSub/(float)(wG[0]*hG[0]));
+	// 更新当前potential
 	currentPotential = idealPotential;
 
-
+	// 绘制特征像素图
 	if(plot)
 	{
 		int w = wG[0];
@@ -370,7 +383,7 @@ int PixelSelector::makeMaps(
  * 
  * @param fh FrameHessian对象
  * @param map_out 筛选出的像素图
- * @param pot 选点的范围大小(pot内选一个点) default=3
+ * @param pot [int](pot是Potential的缩写)选点的范围大小(pot内选一个点) default=3
  * @param thFactor 阈值因子 default=2
  * @return Eigen::Vector3i [out] 不同金字塔层级选择的特征像素数量
  */
