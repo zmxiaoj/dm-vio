@@ -59,6 +59,7 @@ public:
 	float iR;
 	float iRSumNum;
 
+	// 保存当前点的信息矩阵(协方差矩阵的逆)
 	float lastHessian;
 	float lastHessian_new;
 
@@ -66,10 +67,12 @@ public:
 	float maxstep;
 
 	// idx (x+y*w) of closest point one pyramid level above.
+	// 在金字塔上层中的最近邻点(父节点)索引及距离
 	int parent;
 	float parentDist;
 
 	// idx (x+y*w) of up to 10 nearest points in pixel space.
+	// 在金字塔当前层的10个最近邻点索引及距离
 	int neighbours[10];
 	float neighboursDist[10];
 
