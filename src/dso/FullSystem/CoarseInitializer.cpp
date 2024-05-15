@@ -138,15 +138,16 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 
 	Vec3f latestRes = Vec3f::Zero();
 	// 自顶向下遍历图像金字塔
-	// TODO 
 	for(int lvl=pyrLevelsUsed-1; lvl>=0; lvl--)
 	{
-
+		// 如果不是最高层，从更高层向当前层传播
 		if(lvl<pyrLevelsUsed-1)
 			propagateDown(lvl+1);
 
 		Mat88f H,Hsc; Vec8f b,bsc;
+		// 更新lvl层的特征像素，如果是最高层的坏点特征像素进行处理
 		resetPoints(lvl);
+		// 计算残差、Hessian矩阵和Hessian块
 		Vec3f resOld = calcResAndGS(lvl, H, b, Hsc, bsc, refToNew_current, refToNew_aff_current, false);
 		applyStep(lvl);
 
@@ -346,6 +347,19 @@ void CoarseInitializer::debugPlot(int lvl, std::vector<IOWrap::Output3DWrapper*>
 }
 
 // calculates residual, Hessian and Hessian-block neede for re-substituting depth.
+/**
+ * @brief 计算残差、Hessian矩阵和Hessian块
+ * 
+ * @param lvl [in]
+ * @param H_out [out]
+ * @param b_out [out]
+ * @param H_out_sc [out]
+ * @param b_out_sc [out]
+ * @param refToNew [in]
+ * @param refToNew_aff [in] 
+ * @param plot [in]
+ * @return Vec3f 
+ */
 Vec3f CoarseInitializer::calcResAndGS(
 		int lvl, Mat88f &H_out, Vec8f &b_out,
 		Mat88f &H_out_sc, Vec8f &b_out_sc,
@@ -684,35 +698,49 @@ Vec3f CoarseInitializer::calcEC(int lvl)
 	//printf("ER: %f %f %f!\n", couplingWeight*E.A1m[0], couplingWeight*E.A1m[1], (float)E.num.numIn1m);
 	return Vec3f(couplingWeight*E.A1m[0], couplingWeight*E.A1m[1], E.num);
 }
+/**
+ * @brief 使用特征像素的最近邻信息对特征像素的逆深度(仅iR)进行平滑处理
+ * 
+ * @param lvl 
+ */
 void CoarseInitializer::optReg(int lvl)
 {
 	int npts = numPoints[lvl];
 	Pnt* ptsl = points[lvl];
+	// 未完成初始化，直接返回
 	if(!snapped)
 	{
 		return;
 	}
 
-
+	// 遍历特征像素
 	for(int i=0;i<npts;i++)
 	{
 		Pnt* point = ptsl+i;
+		// 特征像素是坏点，直接跳过
 		if(!point->isGood) continue;
 
 		float idnn[10];
 		int nnn=0;
+		// 遍历特征像素的10个最近邻
 		for(int j=0;j<10;j++)
 		{
 			if(point->neighbours[j] == -1) continue;
+			// 获取特征像素的最近邻对象
 			Pnt* other = ptsl+point->neighbours[j];
 			if(!other->isGood) continue;
+			// 记录特征像素最近邻的逆深度信息
 			idnn[nnn] = other->iR;
+			// 统计有效最近邻的数量
 			nnn++;
 		}
 
+		// 有效最近邻的数量大于2
 		if(nnn > 2)
 		{
+			// 部分排列idnn数组，划分为两部分，前nnn/2个元素不大于idnn[nnn/2]，后nnn/2个元素不小于idnn[nnn/2]
 			std::nth_element(idnn,idnn+nnn/2,idnn+nnn);
+			// 选择最近邻的中位数，对特征像素的逆深度(iR)进行平滑处理
 			point->iR = (1-regWeight)*point->idepth + regWeight*idnn[nnn/2];
 		}
 	}
@@ -762,6 +790,11 @@ void CoarseInitializer::propagateUp(int srcLvl)
 	optReg(srcLvl+1);
 }
 
+/**
+ * @brief 将逆深度信息(更新iR, idepth, idepth_new)从srcLvl层传播到srcLvl-1层
+ * 
+ * @param srcLvl 当金字塔上一层
+ */
 void CoarseInitializer::propagateDown(int srcLvl)
 {
 	assert(srcLvl>0);
@@ -771,24 +804,36 @@ void CoarseInitializer::propagateDown(int srcLvl)
 	Pnt* ptss = points[srcLvl];
 	Pnt* ptst = points[srcLvl-1];
 
+	// 遍历srcLvl-1层的所有特征像素
 	for(int i=0;i<nptst;i++)
 	{
+		// 获取srcLvl-1层特征像素Pnt对象
 		Pnt* point = ptst+i;
+		// 获取特征像素在srcLvl的父节点特征像素
 		Pnt* parent = ptss+point->parent;
 
+		// 检查父节点特征像素是否有效
 		if(!parent->isGood || parent->lastHessian < 0.1) continue;
+		// 检查srcLvl-1层特征像素是否有效
+		// 不是好点
 		if(!point->isGood)
 		{
+			// 将srcLvl层父节点特征像素的深度信息传播到srcLvl-1层特征像素
 			point->iR = point->idepth = point->idepth_new = parent->iR;
+			// 更新srcLvl-1层特征像素的状态
 			point->isGood=true;
 			point->lastHessian=0;
 		}
+		// 是好点
 		else
 		{
+			// 通过hessian给point->iR和parent->iR加权求得新的iR，hessian为信息矩阵(方差的倒数)
+			// \mu_new = (\Inform_c * \mu_c + \Inform_p * \mu_p) / (\Inform_c + \Inform_p)
 			float newiR = (point->iR*point->lastHessian*2 + parent->iR*parent->lastHessian) / (point->lastHessian*2+parent->lastHessian);
 			point->iR = point->idepth = point->idepth_new = newiR;
 		}
 	}
+	// 对srcLvl-1层特征像素的逆深度(仅iR)进行平滑处理
 	optReg(srcLvl-1);
 }
 
@@ -937,21 +982,32 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 
 }
 
+/**
+ * @brief 对lvl层的特征像素进行重置并对图像金字塔最高层的坏点特征像素进行处理
+ * 
+ * @param lvl [in] 
+ */
 void CoarseInitializer::resetPoints(int lvl)
 {
 	Pnt* pts = points[lvl];
 	int npts = numPoints[lvl];
+	// 遍历当前层的特征像素
 	for(int i=0;i<npts;i++)
 	{
+		// 重置特征像素的能量
 		pts[i].energy.setZero();
+		// 更新特征像素的逆深度
 		pts[i].idepth_new = pts[i].idepth;
 
-
+		// 如果当前是图像金字塔最高层 且 特征像素是坏点
 		if(lvl==pyrLevelsUsed-1 && !pts[i].isGood)
 		{
+			// 分别记录特征像素最近邻逆深度和，有效数目
 			float snd=0, sn=0;
+			// 遍历特征像素的10个最近邻
 			for(int n = 0;n<10;n++)
 			{
+				// 如果最近邻不存在或者最近邻不是好点，直接跳过
 				if(pts[i].neighbours[n] == -1 || !pts[pts[i].neighbours[n]].isGood) continue;
 				snd += pts[pts[i].neighbours[n]].iR;
 				sn += 1;
@@ -959,12 +1015,15 @@ void CoarseInitializer::resetPoints(int lvl)
 
 			if(sn > 0)
 			{
+				// 标记特征像素为好点
 				pts[i].isGood=true;
+				// 更新特征像素的逆深度(iR, idepth, idepth_new)为最近邻逆深度的平均值
 				pts[i].iR = pts[i].idepth = pts[i].idepth_new = snd/sn;
 			}
 		}
 	}
 }
+
 void CoarseInitializer::doStep(int lvl, float lambda, Vec8f inc)
 {
 
