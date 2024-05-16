@@ -99,8 +99,9 @@ public:
 	AffLight thisToNext_aff;
 	SE3 thisToNext;
 
-
+	// 第一帧对象
 	FrameHessian* firstFrame;
+	// 当前帧对象
 	FrameHessian* newFrame;
 private:
 
@@ -118,7 +119,9 @@ private:
 	int h[PYR_LEVELS];
 	void makeK(CalibHessian* HCalib);
 
+	// 标记初始化是否完成
 	bool snapped;
+	// 初始化完成的帧id
 	int snappedAt;
 
 	// pyramid images & levels on all levels
@@ -129,6 +132,7 @@ private:
 
 	// temporary buffers for H and b.
 	Vec10f* JbBuffer;			// 0-7: sum(dd * dp). 8: sum(res*dd). 9: 1/(1+sum(dd*dd))=inverse hessian entry.
+	// 迭代后更新的JbBuffer
 	Vec10f* JbBuffer_new;
 
     std::array<Accumulator11, NUM_THREADS> accE;

@@ -75,6 +75,14 @@ public:
 
 	}
 
+	/**
+	 * @brief 将callPerIndex存储到this->callPerIndex中
+	 * 
+	 * @param callPerIndex [in] 回调函数
+	 * @param first [in] 开始索引
+	 * @param end [in] 结束索引
+	 * @param stepSize [in] 步长，每个线程处理的索引数量
+	 */
 	inline void reduce(boost::function<void(int,int,Running*,int)> callPerIndex, int first, int end, int stepSize = 0)
 	{
 
@@ -115,6 +123,7 @@ public:
 
 		//printf("reduce waiting for threads to finish\n");
 		// wait for all worker threads to signal they are done.
+		// 等待全部线程完成
 		while(true)
 		{
 			// wait for at least one to finish

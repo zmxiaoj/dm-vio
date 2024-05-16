@@ -100,8 +100,19 @@ EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement43(const Eigen::Vector
 			+ (1-dx-dy+dxdy) * *(const Eigen::Vector3f*)(bp);
 }
 
+/**
+ * @brief Get the Interpolated Element33 object
+ * 		  根据(x,y)坐标计算它在mat中的双线性插值像素值(输入3维，输出3维 像素值+水平梯度+垂直梯度)
+ * 
+ * @param mat 
+ * @param x 
+ * @param y 
+ * @param width 
+ * @return Eigen::Vector3f [out] 像素值
+ */
 EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement33(const Eigen::Vector3f* const mat, const float x, const float y, const int width)
 {
+	// 取坐标的整数和小数部分
 	int ix = (int)x;
 	int iy = (int)y;
 	float dx = x - ix;
@@ -109,6 +120,7 @@ EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement33(const Eigen::Vector
 	float dxdy = dx*dy;
 	const Eigen::Vector3f* bp = mat +ix+iy*width;
 
+	// 保证4个整数像素坐标在图像范围内
     checkBoundsPlus1(ix, iy, width);
 
 	return dxdy * *(const Eigen::Vector3f*)(bp+1+width)
@@ -157,6 +169,15 @@ EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement33OverOr(const Eigen::
 }
 
 
+/**
+ * @brief Get the Interpolated Element31 object
+ *        根据(x,y)坐标计算它在mat中的双线性插值像素值(输入3维，输出1维)
+ * @param mat 
+ * @param x 
+ * @param y 
+ * @param width 
+ * @return EIGEN_ALWAYS_INLINE 
+ */
 EIGEN_ALWAYS_INLINE float getInterpolatedElement31(const Eigen::Vector3f* const mat, const float x, const float y, const int width)
 {
 	int ix = (int)x;
