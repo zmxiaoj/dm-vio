@@ -134,6 +134,16 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 	// 如果第一帧和当前帧的曝光时间都大于0，估计仿射变换初值
 	if(firstFrame->ab_exposure>0 && newFrame->ab_exposure>0)
 		// 仿射参数初始化结果，a为曝光时间比值的对数，b为0
+		/** 
+		 *  a_ji = \frac{t_j * exp(a_j)}{t_i * exp(a_i)}
+		 *  b_ji = b_j - b_i
+		 *  a和b都表示光度参数从帧i到j的相对量
+		 *  初始化时，a_j = a_i = 0, b_j = b_i = 0
+		 *  a_ji = \frac{t_j}{t_i}
+		 *  b_ji = 0
+		 *  实际保存的参数为a-log(a_ji)和b-b_ji
+		 *  a_ji = exp(a)
+		 */
 		refToNew_aff_current = AffLight(logf(newFrame->ab_exposure /  firstFrame->ab_exposure),0); // coarse approximation.
 
 
@@ -379,7 +389,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 	Mat33f RKi = (refToNew.rotationMatrix() * Ki[lvl]).cast<float>();
 	// 第一帧到当前帧的平移矩阵
 	Vec3f t = refToNew.translation().cast<float>();
-	// 光度参数a为曝光时间比值的对数，b为0
+	// 光度参数a_ji为曝光时间比值的对数，b_ji为0
 	Eigen::Vector2f r2new_aff = Eigen::Vector2f(exp(refToNew_aff.a), refToNew_aff.b);
 
 	// 当前层相机内参
@@ -455,13 +465,13 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 
 				// [point->u + dx, point->v + dy]表示特征像素的1个pattern坐标 
-				// 先转换到归一化坐标系，再将特征像素从第一帧(参考帧)变换到当前帧
-				// Pj' = R*(X/Z, Y/Z, 1) + t/Z, 变换到新的点, 深度仍然使用Host帧
+				// x_j = f(x_i, T_i2j, id_i) 
+				// 先转换到归一化坐标系，再将特征像素从第一帧(参考帧)i变换到当前帧j
                 Vec3f pt = RKi * Vec3f(point->u + dx, point->v + dy, 1) + t * point->idepth_new;
-                // 归一化坐标 Pj
+                // 归一化坐标 X_j
 				float u = pt[0] / pt[2];
                 float v = pt[1] / pt[2];
-				// 当前图像金字塔下的像素坐标 pj
+				// 当前图像金字塔下的像素坐标 x_j
                 float Ku = fxl * u + cxl;
                 float Kv = fyl * v + cyl;
 				// 
@@ -490,13 +500,97 @@ Vec3f CoarseInitializer::calcResAndGS(
                 }
 
 
-				// 计算像素的残差
+				/** 计算像素的残差
+				 *  residual = w_huber{I_j(x_j) - (a_ji * I_i(x_i) + b_ji)}
+				 * 
+				 *  a_ji = \frac{t_j * exp(a_j)}{t_i * exp(a_i)}
+				 *  b_ji = b_j - b_i
+				 *  a和b都表示光度参数从帧i到j的相对量
+				 *  初始化时 a_j = a_i = 0, b_j = b_i = 0
+				 *  a_ji = \frac{t_j}{t_i}
+				 *  b_ji = 0
+				 *  实际保存的参数为a-log(a_ji)和b-b_ji
+				 *  a_ji = exp(a)
+				 */
                 float residual = hitColor[0] - r2new_aff[0] * rlR - r2new_aff[1];
 				// 根据阈值判断是否使用Huber核函数
                 float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual);
-                // Huberweight * (2 - Huberweight) = Objective Function
+				// residual^2 | residual < huberTH
+				// huberTH * (2 * |residual| - huberTH) | residual >= huberTH
 				energy += hw * residual * residual * (2 - hw);
 
+				// 
+				/** 残差关于位姿的梯度 
+				 *  dr_d\ksi_i2j = dr_dx_j * dx_j_d\ksi_i2j
+				 * 
+				 *  dr_dx_j = w_huber * dI(x_j)_dx_j(图像梯度) 
+				 *          = w_huber * [I(x_j)_dx I(x_j)_dy]
+				 *  -------------------------------------------
+				 *  投影方程
+				 *  id_i^-1 * x_i = K * X_i
+				 *  id_j^-1 * x_j = K * (R_i2j * X_i + t_i2j)
+				 *  ==>
+				 *  X_i = id_i^-1 * K^-1 * x_i
+				 *  # 从归一化坐标系变换到像素坐标系
+				 *  x_j = K * id_j * (R_i2j * id_i^-1 * K^-1 * x_i + t_i2j)
+				 *      = K * x_j'
+				 * 	x_j' = [u_j', v_j', 1]^T
+				 * 
+				 *  dx_j_d\ksi_i2j = dx_j_dx_j' * dx_j'_d\ksi_i2j 
+				 *  
+				 *  dx_j_dx_j' = [f_x 0   0; 
+				 *  			  0   f_y 0; 
+				 * 				  0   0   0]
+				 * 
+				 *  dx_j'_d\ksi_i2j = 
+				 * 
+				 * 
+				 */
+				/** 残差关于逆深度的梯度 
+				 *  dr_did_i = dr_dx_j * dx_j_did_i
+				 * 
+				 *  dr_dx_j = w_huber * dI(x_j)_dx_j(图像梯度) 
+				 *          = w_huber * [I(x_j)_dx I(x_j)_dy 0]
+				 *  -------------------------------------------
+				 *  dx_j_did_i = dx_j_dx_j' * dx_j'_did_i
+				 *  -------------------------------------------
+				 *  dx_j'_did_i = [du_j'_did_i, dv_j'_did_i, 0]^T
+				 *  
+				 *  x_j' = R_i2j * id_i^-1 * K^-1 * x_i + t_i2j
+				 *  令 R_i2j * K^-1 * x_i = A = [a_1^T; a_2^T; a_3^T]
+				 *  [u_j',          [id_i^-1 * a_1^T * x_i + t_i2j_x
+				 *   v_j', = id_2 *  id_i^-1 * a_2^T * x_i + t_i2j_y
+				 *   1   ]           id_i^-1 * a_3^T * x_i + t_i2j_z]
+				 *  ==>
+				 *  id_2 = (id_i^-1 * a_3^T * x_i + t_i2j_z)^-1
+				 *  -------------------------------------------
+				 *  u_j' = (id_i^-1 * a_1^T * x_i + t_i2j_x) / (id_i^-1 * a_3^T * x_i + t_i2j_z)
+				 *       = (a_1^T * x_i + id_i * t_i2j_x) / (a_3^T * x_i + id_i * t_i2j_z)
+				 *  v_j' = (id_i^-1 * a_2^T * x_i + t_i2j_x) / (id_i^-1 * a_3^T * x_i + t_i2j_z) 
+				 *       = (a_2^T * x_i + id_i * t_i2j_x) / (a_3^T * x_i + id_i * t_i2j_z)
+				 * 
+				 *  -------------------------------------------
+				 * 	du_j'_did_i = id_i^-1 * id_j * (t_i2j_x - u_j' * t_i2j_z)
+				 *  dv_j'_did_i = id_i^-1 * id_j * (t_i2j_y - v_j' * t_i2j_z)
+				 * 
+				 *  -------------------------------------------
+				 *  dx_j_did_i = dx_j_dx_j' * dx_j'_did_i 
+				 *             = [f_x 0   0;    [id_i^-1 * id_j * (t_i2j_x - u_j' * t_i2j_z);
+				 *  			  0   f_y 0;  *  id_i^-1 * id_j * (t_i2j_y - v_j' * t_i2j_z);
+				 * 				  0   0   0 ]                         0                      ]
+				 * 			   = [f_x * id_i^-1 * id_j * (t_i2j_x - u_j' * t_i2j_z);
+				 *                f_y * id_i^-1 * id_j * (t_i2j_y - v_j' * t_i2j_z);
+				 *                                     0                            ]
+				 *  -------------------------------------------
+				 *  dr_did_i = dr_dx_j * dx_j_did_i
+				 *           = w_huber * [I(x_j)_dx I(x_j)_dy 0]_1x3 
+				 *  		   * [f_x * id_i^-1 * id_j * (t_i2j_x - u_j' * t_i2j_z);
+				 *                f_y * id_i^-1 * id_j * (t_i2j_y - v_j' * t_i2j_z);
+				 *                                     0                            ]_3x1
+				 *           = w_huber * [I(x_j)_dx * f_x * id_i^-1 * id_j * (t_i2j_x - u_j' * t_i2j_z) 
+				 * 						+ I(x_j)_dy * f_y * id_i^-1 * id_j * (t_i2j_y - v_j' * t_i2j_z)]                
+				 *                                
+				 */
 
                 float dxdd = (t[0] - t[2] * u) / pt[2];
                 float dydd = (t[1] - t[2] * v) / pt[2];
@@ -510,7 +604,11 @@ Vec3f CoarseInitializer::calcResAndGS(
                 dp3[idx] = -u * v * dxInterp - (1 + v * v) * dyInterp;
                 dp4[idx] = (1 + u * u) * dxInterp + u * v * dyInterp;
                 dp5[idx] = -v * dxInterp + u * dyInterp;
+				// 残差关于光度参数的梯度 
+				// a_ji' = exp(a_ji)
+				// dr_da_ji = -w_huber * a_ji' * I_i(x_i)
                 dp6[idx] = -hw * r2new_aff[0] * rlR;
+				// dr_db_ji = -w_huber
                 dp7[idx] = -hw * 1;
                 dd[idx] = dxInterp * dxdd + dyInterp * dydd;
                 r[idx] = hw * residual;
