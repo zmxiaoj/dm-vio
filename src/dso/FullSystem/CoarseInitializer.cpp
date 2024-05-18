@@ -158,9 +158,9 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 		Mat88f H,Hsc; Vec8f b,bsc;
 		// 更新lvl层的特征像素，如果是最高层的坏点特征像素进行处理
 		resetPoints(lvl);
-		// 计算残差、Hessian矩阵和Hessian块
+		// 计算lvl层的Hessian矩阵、b向量和schur complement后的Hessian矩阵、向量
 		Vec3f resOld = calcResAndGS(lvl, H, b, Hsc, bsc, refToNew_current, refToNew_aff_current, false);
-		// 
+		// 更新lvl层特征像素的属性
 		applyStep(lvl);
 
 		float lambda = 0.1;
@@ -182,6 +182,7 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 			std::cout << refToNew_current.log().transpose() << " AFF " << refToNew_aff_current.vec().transpose() <<"\n";
 		}
 
+		// 进行迭代
 		int iteration=0;
 		while(true)
 		{
@@ -360,17 +361,17 @@ void CoarseInitializer::debugPlot(int lvl, std::vector<IOWrap::Output3DWrapper*>
 
 // calculates residual, Hessian and Hessian-block neede for re-substituting depth.
 /**
- * @brief 计算残差、Hessian矩阵和Hessian块
+ * @brief 计算残差、Hessian矩阵和schur complement的Hessian矩阵
  * 
- * @param lvl [in]
- * @param H_out [out]
- * @param b_out [out]
- * @param H_out_sc [out]
- * @param b_out_sc [out]
- * @param refToNew [in]
- * @param refToNew_aff [in] 
+ * @param lvl [in] 图像金字塔的层数
+ * @param H_out [out] 高斯牛顿法的Hessian矩阵
+ * @param b_out [out] 高斯牛顿法的b向量
+ * @param H_out_sc [out] schur complement的Hessian矩阵
+ * @param b_out_sc [out] schur complement的b向量
+ * @param refToNew [in] 参考帧到当前帧的位姿
+ * @param refToNew_aff [in] 参考帧到当前帧的光度变换
  * @param plot [in]
- * @return Vec3f 
+ * @return Vec3f 返回能量函数、和特征像素数目
  */
 Vec3f CoarseInitializer::calcResAndGS(
 		int lvl, Mat88f &H_out, Vec8f &b_out,
@@ -438,17 +439,60 @@ Vec3f CoarseInitializer::calcResAndGS(
                 continue;
             }
 
-			// 8x1矩阵，每个点附近的残差个数为8个
+			/** 优化问题构建、高斯牛顿方程及Schur complement
+			 *  对于初始化阶段参考帧到当前帧的变换x_i2j包含(6维位姿(xyzryp)+2维光度参数)8维参数
+			 *  delta_x 优化参数包含(6维位姿+2维光度参数+N个特征像素逆深度) (N+8)x1向量
+			 *  delta_x = [delta_id_i1 delta_id_i2 ... delta_id_iN  
+			 *             delta_\ksi_i2j_1 delta_\ksi_i2j_2 ... delta_\ksi_i2j_6 
+			 *    		   delta_a_i2j delta_b_i2j]^T
+			 *          = [delta_id^T delta_\ksi_i2j^T delta_a delta_b]^T
+			 *          = [delta_id^T delta_x_i2j]^T_(N+8)x1
+			 *  ------------------------------------
+			 *  高斯牛顿方程 
+			 *  J^T * J * delta_x = -J^T * r_i2j
+			 *  ------------------------------------
+			 *  Jocabian矩阵 Nx(N+8)矩阵
+			 *  J = [dr_i2j^1_ddelta_id_i1 ... dr_i2j^1_ddelta_id_iN dr_i2j^1_ddelta_\ksi_i2j_1 ... dr_i2j^1_ddelta_\ksi_i2j_6 dr_i2j^1_ddelta_a dr_i2j^1_ddelta_b
+			 *       dr_i2j^2_ddelta_id_i1 ... dr_i2j^2_ddelta_id_iN dr_i2j^2_ddelta_\ksi_i2j_1 ... dr_i2j^2_ddelta_\ksi_i2j_6 dr_i2j^2_ddelta_a dr_i2j^2_ddelta_b
+			 *       ...
+			 * 		 dr_i2j^N_ddelta_id_i1 ... dr_i2j^N_ddelta_id_iN dr_i2j^N_ddelta_\ksi_i2j_1 ... dr_i2j^N_ddelta_\ksi_i2j_6 dr_i2j^N_ddelta_a dr_i2j^N_ddelta_b]_Nx(N+8)
+			 *    = [J_id J_x_i2j]_Nx(N+8)
+			 *  J_id 为NxN矩阵，J_x_i2j为Nx8矩阵
+			 *  ------------------------------------
+			 *  高斯牛顿方程展开
+			 *  [J_id^T J_x_i2j^T]^T * [J_id J_x_i2j] * delta_x = -[J_id^T J_x_i2j^T] * r_i2j
+			 *  ==>
+			 *  [(J_id^T * J_id)_NxN    (J_id^T * J_x_i2j)_Nx8       [delta_id        [J_id^T * r_i2j
+			 *   (J_x_i2j^T * J_id)_8xN (J_x_i2j^T * J_x_i2j)_8x8] *  delta_x_i2j] = - J_x_i2j^T * r_i2j]
+			 *  ==>
+			 *  [H_id_id    H_id_x    [delta_id        [J_id^T * r_i2j
+			 *   H_x_id     H_x_x ] *  delta_x_i2j] = - J_x_i2j^T * r_i2j]
+			 *  ------------------------------------
+			 *  进行Schur complement消除delta_id 
+			 *  [H_id_id    H_id_x                                        
+			 *      0       H_x_x - H_id_x^T * H_id_id^(-1) * H_id_x ] 
+			 *    [delta_id        
+			 *  *  delta_x_i2j] 
+			 *  = 
+			 *  - [J_id^T * r_i2j 
+			 *     J_x_i2j^T * r_i2j - H_id_x^T * H_id_id^(-1) * J_id^T * r_i2j]
+			 * 
+			 */
+			// dp0-dp5 残差关于i2j位姿变换(xyzrpy)的梯度
             VecNRf dp0;
             VecNRf dp1;
             VecNRf dp2;
             VecNRf dp3;
             VecNRf dp4;
             VecNRf dp5;
+			// dp6-dp7 残差关于i2j光度变换的梯度
             VecNRf dp6;
             VecNRf dp7;
+			// dd 残差关于当前特征像素在第一帧逆深度的梯度
             VecNRf dd;
+			// r  当前特征像素的残差
             VecNRf r;
+			// schur complement后的中间变量
             JbBuffer_new[i].setZero();
 
             // sum over all residuals.
@@ -467,14 +511,16 @@ Vec3f CoarseInitializer::calcResAndGS(
 				// [point->u + dx, point->v + dy]表示特征像素的1个pattern坐标 
 				// x_j = f(x_i, T_i2j, id_i) 
 				// 先转换到归一化坐标系，再将特征像素从第一帧(参考帧)i变换到当前帧j
-                Vec3f pt = RKi * Vec3f(point->u + dx, point->v + dy, 1) + t * point->idepth_new;
-                // 归一化坐标 X_j
+                // 相机坐标 X_j = [X_j_x X_j_y X_j_z]^T 
+				Vec3f pt = RKi * Vec3f(point->u + dx, point->v + dy, 1) + t * point->idepth_new;
+                // 归一化坐标 x_j' = [u v 1]^T 逆深度 pt[2]^(-1)
 				float u = pt[0] / pt[2];
                 float v = pt[1] / pt[2];
 				// 当前图像金字塔下的像素坐标 x_j
                 float Ku = fxl * u + cxl;
                 float Kv = fyl * v + cyl;
-				// 
+				// 当前帧的逆深度 id_j = id_i / pt[2]
+				// pt[2] = id_i * id_j^(-1)
                 float new_idepth = point->idepth_new / pt[2];
 
 				// 筛选并标记坏点
@@ -501,7 +547,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 
 				/** 计算像素的残差
-				 *  residual = w_huber{I_j(x_j) - (a_ji * I_i(x_i) + b_ji)}
+				 *  residual_i2j = w_huber{I_j(x_j) - (a_ji * I_i(x_i) + b_ji)}
 				 * 
 				 *  a_ji = \frac{t_j * exp(a_j)}{t_i * exp(a_i)}
 				 *  b_ji = b_j - b_i
@@ -519,7 +565,6 @@ Vec3f CoarseInitializer::calcResAndGS(
 				// huberTH * (2 * |residual| - huberTH) | residual >= huberTH
 				energy += hw * residual * residual * (2 - hw);
 
-				// 
 				/** 残差关于位姿的梯度 
 				 *  dr_d\ksi_i2j = dr_dx_j * dx_j_d\ksi_i2j
 				 * 
@@ -531,22 +576,69 @@ Vec3f CoarseInitializer::calcResAndGS(
 				 *  id_j^-1 * x_j = K * (R_i2j * X_i + t_i2j)
 				 *  ==>
 				 *  X_i = id_i^-1 * K^-1 * x_i
-				 *  # 从归一化坐标系变换到像素坐标系
+				 *  # 从归一化坐标系x_j'变换到像素坐标系x_j
 				 *  x_j = K * id_j * (R_i2j * id_i^-1 * K^-1 * x_i + t_i2j)
 				 *      = K * x_j'
-				 * 	x_j' = [u_j', v_j', 1]^T
+				 * 	x_j' = id_j * (R_i2j * X_i + t_i2j)
+				 * 		 = id_j * (R_i2j * id_i^-1 * K^-1 * x_i + t_i2j)
+				 *       = [u_j', v_j', 1]^T
 				 * 
 				 *  dx_j_d\ksi_i2j = dx_j_dx_j' * dx_j'_d\ksi_i2j 
 				 *  
 				 *  dx_j_dx_j' = [f_x 0   0; 
 				 *  			  0   f_y 0; 
-				 * 				  0   0   0]
+				 * 				  0   0   0 ]
+				 *  
+				 * 	--------------------------------------------
+				 *  x_j' = id_j * X_j
+				 *  dX_j_d\ksi_i2j = [dX_j_x_d\ksi_i2j; 
+				 * 					  dX_j_y_d\ksi_i2j; 
+				 * 					  dX_j_z_d\ksi_i2j ]
+				 *                 = [1 0 0    0    X_j_z -X_j_y;
+				 *                    0 1 0 -X_j_z   0     X_j_x;
+				 * 					  0 0 1  X_j_y -X_j_x    0   ]
 				 * 
-				 *  dx_j'_d\ksi_i2j = 
-				 * 
-				 * 
+				 *  did_j_d\ksi_i2j = -X_j_z^(-2) * [0 0 1 X_j_y -X_j_x 0]
+				 *  
+				 *  -------------------------------------------- 
+				 *  dx_j'_d\ksi_i2j = did_j_d\ksi_i2j * X_j + id_j * dX_j_d\ksi_i2j
+				 *                  = [did_j_d\ksi_i2j * X_j_x;
+				 *                     did_j_d\ksi_i2j * X_j_y;
+				 * 					   did_j_d\ksi_i2j * X_j_z ]
+				 *                    + 
+				 * 	                  X_j_z^(-1) *
+				 *                    [1 0 0    0    X_j_z -X_j_y;
+				 *                     0 1 0 -X_j_z   0     X_j_x;
+				 * 					   0 0 1  X_j_y -X_j_x    0   ]
+				 *                  = [X_j_z^(-1)     0      -X_j_x * X_j_z^(-2) -X_j_x * X_j_y * X_j_z^(-2) 1 + X_j_x^2 * X_j_z^(-2)   -X_j_y * X_j_z^(-1);
+				 *                          0     X_j_z^(-1) -X_j_y * X_j_z^(-2) -X_j_y^2 * X_j_z^(-2) -1    X_j_x * X_j_y * X_j_z^(-1)  X_j_x * X_j_z^(-1);
+				 *                          0         0			   0                     0                          0                           0           ]
+				 *                  = [id_j    0  -id_j * u_j'  -u_j' * v_j'  1 + u_j'^2  -v_j';
+				 *                       0   id_j -id_j * v_j'  -v_j'^2 -1    u_j' * v_j'  u_j';
+				 *                       0     0       0             0             0        0   ]
+				 *  --------------------------------------------
+				 *  dr_d\ksi_i2j = dr_dx_j * dx_j_d\ksi_i2j
+				 *               = dr_dx_j * dx_j_dx_j' * dx_j'_d\ksi_i2j 
+				 *               = w_huber * [I(x_j)_dx I(x_j)_dy 0]_1x3 
+				 *                 * 
+				 * 				   [f_x  0   0; 
+				 *  			     0  f_y  0; 
+				 * 				     0   0   0 ]
+				 *                 * 
+				 *                 [id_j    0  -id_j * u_j'  -u_j' * v_j'  1 + u_j'^2  -v_j';
+				 *                    0   id_j -id_j * v_j'  -v_j'^2 -1    u_j' * v_j'  u_j';
+				 *                    0     0       0             0             0        0   ]  
+				 *               = w_huber 
+				 *                 *
+				 *                 [  I(x_j)_dx * f_x * id_j;
+				 *                    I(x_j)_dy * f_y * id_j;
+				 * 					- I(x_j)_dx + f_x * id_j * u_j'  - I(x_j)_dy * f_y * id_j * v_j';
+				 *                  - I(x_j)_dx * f_x * u_j' * v_j'  - I(x_j)_dy * f_y * (1 + v_j') ; 
+				 *                    I(x_j)_dx * f_x * (1 + u_j'^2) + I(x_j)_dy * f_y * u_j' * v_j';
+				 * 	                - I(x_j)_dx * f_x * v_j' + I(x_j)_dy * f_y * u_j'                ]
+				 *                  
 				 */
-				/** 残差关于逆深度的梯度 
+				/** 残差关于第一帧点逆深度的梯度 
 				 *  dr_did_i = dr_dx_j * dx_j_did_i
 				 * 
 				 *  dr_dx_j = w_huber * dI(x_j)_dx_j(图像梯度) 
@@ -562,7 +654,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 				 *   v_j', = id_2 *  id_i^-1 * a_2^T * x_i + t_i2j_y
 				 *   1   ]           id_i^-1 * a_3^T * x_i + t_i2j_z]
 				 *  ==>
-				 *  id_2 = (id_i^-1 * a_3^T * x_i + t_i2j_z)^-1
+				 *  id_j = (id_i^-1 * a_3^T * x_i + t_i2j_z)^-1
 				 *  -------------------------------------------
 				 *  u_j' = (id_i^-1 * a_1^T * x_i + t_i2j_x) / (id_i^-1 * a_3^T * x_i + t_i2j_z)
 				 *       = (a_1^T * x_i + id_i * t_i2j_x) / (a_3^T * x_i + id_i * t_i2j_z)
@@ -598,6 +690,7 @@ Vec3f CoarseInitializer::calcResAndGS(
                 if(hw < 1) hw = sqrtf(hw);
                 float dxInterp = hw * hitColor[1] * fxl;
                 float dyInterp = hw * hitColor[2] * fyl;
+				// 残差关于i2j位姿变换的梯度
                 dp0[idx] = new_idepth * dxInterp;
                 dp1[idx] = new_idepth * dyInterp;
                 dp2[idx] = -new_idepth * (u * dxInterp + v * dyInterp);
@@ -610,13 +703,19 @@ Vec3f CoarseInitializer::calcResAndGS(
                 dp6[idx] = -hw * r2new_aff[0] * rlR;
 				// dr_db_ji = -w_huber
                 dp7[idx] = -hw * 1;
+				// 残差关于逆深度的梯度
                 dd[idx] = dxInterp * dxdd + dyInterp * dydd;
+				// 当前特征像素的残差
                 r[idx] = hw * residual;
 
                 float maxstep = 1.0f / Vec2f(dxdd * fxl, dydd * fyl).norm();
                 if(maxstep < point->maxstep) point->maxstep = maxstep;
 
                 // immediately compute dp*dd' and dd*dd' in JbBuffer1.
+				// 将每个特征像素的pattern(8个)点的J_x_i2j^T * J_id_i、J_id_i^T * r_i2j、J_id_i^T * J_id_i进行累加
+				// 1x8 vector: J_x_i2j 
+				// scalar: J_id_i r_i2j
+				// 0-7: J_x_i2j^T * J_id_i
                 JbBuffer_new[i][0] += dp0[idx] * dd[idx];
                 JbBuffer_new[i][1] += dp1[idx] * dd[idx];
                 JbBuffer_new[i][2] += dp2[idx] * dd[idx];
@@ -625,13 +724,18 @@ Vec3f CoarseInitializer::calcResAndGS(
                 JbBuffer_new[i][5] += dp5[idx] * dd[idx];
                 JbBuffer_new[i][6] += dp6[idx] * dd[idx];
                 JbBuffer_new[i][7] += dp7[idx] * dd[idx];
+				// scalar: J_id_i^T * r_i2j = r_i2j^T * J_id_i
                 JbBuffer_new[i][8] += r[idx] * dd[idx];
+				// scalar: J_id_i^T * J_id_i
                 JbBuffer_new[i][9] += dd[idx] * dd[idx];
             }
 
+			// 筛除坏点或者能量超出阈值的情况
             if(!isGood || energy > point->outlierTH * 20)
             {
+				// 使用上一帧的能量进行更新
                 E.updateSingle((float) (point->energy[0]));
+				// 更新标记
                 point->isGood_new = false;
                 point->energy_new = point->energy;
                 continue;
@@ -639,13 +743,21 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 
             // add into energy.
+			// 累加能量，更新特征像素的状态
             E.updateSingle(energy);
             point->isGood_new = true;
             point->energy_new[0] = energy;
 
             // update Hessian matrix.
+			/** acc9.H为9x9矩阵
+			 *  [J_x_i2j^T * J_x_i2j  J_x_i2j^T * r_i2j
+			 *   r_i2j^T * J_x_i2j     r_i2j^T * r_i2j ]
+			 * 
+			 */
+			// 共有patternNum个pattern，每次读取4个pattern，循环2次可处理完
             for(int i = 0; i + 3 < patternNum; i += 4)
                 acc9.updateSSE(
+						// 将从dp0取连续4个float变量到寄存器中
                         _mm_load_ps(((float*) (&dp0)) + i),
                         _mm_load_ps(((float*) (&dp1)) + i),
                         _mm_load_ps(((float*) (&dp2)) + i),
@@ -657,6 +769,7 @@ Vec3f CoarseInitializer::calcResAndGS(
                         _mm_load_ps(((float*) (&r)) + i));
 
 
+			// 处理patternNum%4!=0的情况
             for(int i = ((patternNum >> 2) << 2); i < patternNum; i++)
                 acc9.updateSingle(
                         (float) dp0[i], (float) dp1[i], (float) dp2[i], (float) dp3[i],
@@ -670,7 +783,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 	// 并行调用processPointsForReduce函数，索引范围为0到npts，步长为50，线程数为6
     reduce.reduce(processPointsForReduce, 0, npts, 50);
 
-	// 完成累加器
+	// 完成累加
     for(auto&& acc9 : acc9s)
     {
         acc9.finish();
@@ -682,8 +795,10 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 
 	// calculate alpha energy, and decide if we cap it.
+	// 计算
 	Accumulator11 EAlpha;
 	EAlpha.initialize();
+	// 遍历特征像素
 	for(int i=0;i<npts;i++)
 	{
 		Pnt* point = ptsl+i;
@@ -709,6 +824,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 	// compute alpha opt.
 	float alphaOpt;
+	// clamp alphaEnergy to alphaK*npts
 	if(alphaEnergy > alphaK*npts)
 	{
 		alphaOpt = 0;
@@ -720,7 +836,33 @@ Vec3f CoarseInitializer::calcResAndGS(
 	}
 
 
+	// 计算Schur complement后的acc9矩阵
+	/** acc9.H为9x9矩阵
+	 *  [J_x_i2j^T * J_x_i2j  J_x_i2j^T * r_i2j
+	 *   r_i2j^T * J_x_i2j     r_i2j^T * r_i2j ]
+	 *  ------------------------------------
+   	 *  [H_id_id    H_id_x    [delta_id        [J_id^T * r_i2j
+	 *   H_x_id     H_x_x ] *  delta_x_i2j] = - J_x_i2j^T * r_i2j]
+	 *  ------------------------------------
+	 *  进行Schur complement消除delta_id 
+	 *  [H_id_id    H_id_x                                        
+	 *      0       H_x_x - H_id_x^T * H_id_id^(-1) * H_id_x ] 
+	 *    [delta_id        
+	 *  *  delta_x_i2j] 
+	 *  = 
+	 *  - [J_id^T * r_i2j 
+	 *     J_x_i2j^T * r_i2j - H_id_x^T * H_id_id^(-1) * J_id^T * r_i2j]
+	 *  ------------------------------------
+	 *  H_id_x^T * H_id_id^(-1) * H_id_x
+	 *  = (J_id_i^T * J_x_i2j)^T * (J_id_i^T * J_id_i)^(-1) * (J_id_i^T * J_x_i2j)
+	 *  = (J_id_i * J_id_i^T)^(-1) * J_x_i2j^T * J_id_i * J_id_i^T * J_x_i2j
+	 *  
+	 *  H_id_x^T * H_id_id^(-1) * J_id^T * r_i2j
+	 *  = (J_id_i^T * J_x_i2j)^T * (J_id_i^T * J_id_i)^(-1) * J_id_i^T * r_i2j
+	 *  = (J_id_i * J_id_i^T)^(-1) * J_x_i2j^T * J_id_i * J_id_i^T * r_i2j
+	 */
 	acc9SC.initialize();
+	// 遍历特征像素
 	for(int i=0;i<npts;i++)
 	{
 		Pnt* point = ptsl+i;
@@ -738,6 +880,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			JbBuffer_new[i][9] += couplingWeight;
 		}
 
+		// 取1/(J_id_i^T * J_id_i + 1)，并保证数值稳定性
 		JbBuffer_new[i][9] = 1/(1+JbBuffer_new[i][9]);
 		acc9SC.updateSingleWeighted(
 				(float)JbBuffer_new[i][0],(float)JbBuffer_new[i][1],(float)JbBuffer_new[i][2],(float)JbBuffer_new[i][3],
@@ -747,19 +890,24 @@ Vec3f CoarseInitializer::calcResAndGS(
 	acc9SC.finish();
 
 
+	// 赋值前清零
     H_out.setZero();
     b_out.setZero();
     // This needs to sum up the acc9s from all the workers!
+	// 将所有线程的acc9累加到H_out和b_out中
     for(auto&& acc9 : acc9s)
     {
+		// Hessian矩阵，左上角8x8矩阵累加
         H_out += acc9.H.topLeftCorner<8,8>();// / acc9.num;
+		// b向量，右上角8x1矩阵累加
         b_out += acc9.H.topRightCorner<8,1>();// / acc9.num;
     }
+	// Schur complement后的Hessian矩阵和b向量
 	H_out_sc = acc9SC.H.topLeftCorner<8,8>();// / acc9.num;
 	b_out_sc = acc9SC.H.topRightCorner<8,1>();// / acc9.num;
 
 
-
+	// TODO: ?对平移部分进行处理
 	H_out(0,0) += alphaOpt*npts;
 	H_out(1,1) += alphaOpt*npts;
 	H_out(2,2) += alphaOpt*npts;
@@ -772,6 +920,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 	// Add zero prior to translation.
     // setting_weightZeroPriorDSOInitY is the squared weight of the prior residual.
+	// 增加xy方向的先验
     H_out(1, 1) += setting_weightZeroPriorDSOInitY;
     b_out(1) += setting_weightZeroPriorDSOInitY * refToNew.translation().y();
 
@@ -780,12 +929,14 @@ Vec3f CoarseInitializer::calcResAndGS(
 
     double A = 0;
     int num = 0;
+	// 累加能量及有效特征像素数量
     for(auto&& E : accE)
     {
         A += E.A;
         num += E.num;
     }
 
+	// 输出能量值, ？, 有效特征像素数量 
 	return Vec3f(A, alphaEnergy, num);
 }
 
@@ -1192,8 +1343,10 @@ void CoarseInitializer::applyStep(int lvl)
 {
 	Pnt* pts = points[lvl];
 	int npts = numPoints[lvl];
+	// 遍历特征像素
 	for(int i=0;i<npts;i++)
 	{
+		// 更新好点的属性
 		if(!pts[i].isGood)
 		{
 			pts[i].idepth = pts[i].idepth_new = pts[i].iR;
