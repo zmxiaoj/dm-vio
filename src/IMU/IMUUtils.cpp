@@ -29,11 +29,20 @@
 using namespace dmvio;
 using namespace gtsam;
 
+/**
+ * @brief 遍历imuDta，将数据积分到preintegrated中
+ * 
+ * @param imuData [in] 累计的imu数据
+ * @param preintegrated [in&out] 预积分的imu数据 
+ */
 void dmvio::integrateIMUData(const IMUData& imuData, gtsam::PreintegratedImuMeasurements& preintegrated)
 {
+    // 遍历imuData
     for(const auto& measurement : imuData)
     {
+        // 如果积分时间为0，则跳过
         if(measurement.getIntegrationTime() == 0.0) continue;
+        // 预积分
         preintegrated.integrateMeasurement(gtsam::Vector(measurement.getAccData()),
                                            gtsam::Vector(measurement.getGyrData()),
                                            measurement.getIntegrationTime());

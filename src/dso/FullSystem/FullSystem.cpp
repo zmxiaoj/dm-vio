@@ -1006,6 +1006,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
 			// 跟踪成功，完成初始化
 			if (initDone)    // if SNAPPED
             {
+				// 
                 initializeFromInitializer(fh);
                 if(setting_useIMU && linearizeOperation)
                 {
@@ -1015,6 +1016,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
                 initMeasure.end();
                 for(IOWrap::Output3DWrapper* ow : outputWrapper)
                     ow->publishSystemStatus(dmvio::VISUAL_ONLY);
+				// 将帧信息传递给后端
                 deliverTrackedFrame(fh, true);
             } 
 			// 跟踪失败
@@ -1635,6 +1637,11 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 }
 
 
+/**
+ * @brief 
+ * 
+ * @param newFrame 
+ */
 void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 {
 	boost::unique_lock<boost::mutex> lock(mapMutex);

@@ -66,6 +66,10 @@ CoarseInitializer::CoarseInitializer(int ww, int hh)
 	fixAffine=true;
 	printDebug=false;
 
+	// wM为8x8的对角矩阵，对角元素为
+	// [SCALE_XI_ROT,   SCALE_XI_ROT,   SCALE_XI_ROT, 
+	//  SCALE_XI_TRANS, SCALE_XI_TRANS, SCALE_XI_TRANS,
+	//  SCALE_A,        SCALE_B]
 	wM.diagonal()[0] = wM.diagonal()[1] = wM.diagonal()[2] = SCALE_XI_ROT;
 	wM.diagonal()[3] = wM.diagonal()[4] = wM.diagonal()[5] = SCALE_XI_TRANS;
 	wM.diagonal()[6] = SCALE_A;
@@ -106,7 +110,7 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 	regWeight = 0.8;//*freeDebugParam4;
 	couplingWeight = 1;//*freeDebugParam5;
 
-	// 初始化未完成
+	// 初始化未完成，平移不够大
 	if(!snapped)
 	{
 		// 初始化位姿
@@ -187,16 +191,30 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 		while(true)
 		{
 			Mat88f Hl = H;
+			// LM方法，增加 lambda * I
 			for(int i=0;i<8;i++) Hl(i,i) *= (1+lambda);
+			// 计算schur complement 边缘化掉逆深度的H_xx(H_xi2j_xi2j)矩阵
+			// TODO: 为什么乘1/(1+lambda)
 			Hl -= Hsc*(1/(1+lambda));
+			// 计算b向量
 			Vec8f bl = b - bsc*(1/(1+lambda));
 
+			// wM为8x8的对角矩阵，对角元素为(表示不同属性的权重)
+			// [SCALE_XI_ROT,   SCALE_XI_ROT,   SCALE_XI_ROT, 
+			//  SCALE_XI_TRANS, SCALE_XI_TRANS, SCALE_XI_TRANS,
+			//  SCALE_A,        SCALE_B]
 			Hl = wM * Hl * wM * (0.01f/(w[lvl]*h[lvl]));
 			bl = wM * bl * (0.01f/(w[lvl]*h[lvl]));
 
 
+			// 求解schur complement后的优化方程，得到delta_x_i2j
+			/** Hl * delta_x_i2j = -bl
+			 * Hl = H_x_x - H_id_x^T * H_id_id^(-1) * H_id_x 
+			 * bl = J_x_i2j^T * r_i2j - H_id_x^T * H_id_id^(-1) * J_id^T * r_i2j
+			 */
             Vec8f inc;
             SE3 refToNew_new;
+			// 固定相机光度参数
             if (fixAffine)
             {
                 // Note as we set the weights of rotation and translation to 1 the wM is just the identity in this case.
@@ -206,24 +224,30 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
             } else
                 inc = -(wM * (Hl.ldlt().solve(bl)));    //=-H^-1 * b.
 
+			// 增量的范数
             double incNorm = inc.norm();
 
+			// 更新迭代后的参考帧到当前帧的位姿
             refToNew_new = SE3::exp(inc.head<6>().cast<double>()) * refToNew_current;
 
+			// 更新迭代后的参考帧到当前帧的光度变换
 			AffLight refToNew_aff_new = refToNew_aff_current;
 			refToNew_aff_new.a += inc[6];
 			refToNew_aff_new.b += inc[7];
+			// 更新迭代参数
 			doStep(lvl, lambda, inc);
 
 
 			Mat88f H_new, Hsc_new; Vec8f b_new, bsc_new;
 			Vec3f resNew = calcResAndGS(lvl, H_new, b_new, Hsc_new, bsc_new, refToNew_new, refToNew_aff_new, false);
+			// 计算正则化能量函数
 			Vec3f regEnergy = calcEC(lvl);
 
+			// 计算迭代前后的能量函数
 			float eTotalNew = (resNew[0]+resNew[1]+regEnergy[1]);
 			float eTotalOld = (resOld[0]+resOld[1]+regEnergy[0]);
 
-
+			// 判断是否接受迭代结果
 			bool accept = eTotalOld > eTotalNew;
 
 			if(printDebug)
@@ -243,8 +267,10 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 				std::cout << refToNew_new.log().transpose() << " AFF " << refToNew_aff_new.vec().transpose() <<"\n";
 			}
 
+			// 更新迭代结果
 			if(accept)
 			{
+				// alphaEnergy=alphaK*numPoints，说明位移足够大，更新标记
 				if(resNew[1] == alphaK*numPoints[lvl])
 					snapped = true;
 				H = H_new;
@@ -260,6 +286,7 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 				fails=0;
 				if(lambda < 0.0001) lambda = 0.0001;
 			}
+			// 标记迭代失败
 			else
 			{
 				fails++;
@@ -269,6 +296,7 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 
 			bool quitOpt = false;
 
+			// 检查迭代终止条件
 			if(!(incNorm > eps) || iteration >= maxIterations[lvl] || fails >= 2)
 			{
 				Mat88f H,Hsc; Vec8f b,bsc;
@@ -289,12 +317,13 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 	thisToNext = refToNew_current;
 	thisToNext_aff = refToNew_aff_current;
 
+	// 更新上一层的特征像素
 	for(int i=0;i<pyrLevelsUsed-1;i++)
 		propagateUp(i);
 
 
 
-
+	// 初始化成功，更新标记并记录帧ID
 	frameID++;
 	if(!snapped) snappedAt=0;
 
@@ -302,11 +331,11 @@ bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IO
 		snappedAt = frameID;
 
 
-
+	// 输出当前帧的特征像素
     debugPlot(0,wraps);
 
 
-
+	// 位移足够大(初始化成功) 且 连续5帧都成功 
 	return snapped && frameID > snappedAt+5;
 }
 
@@ -371,7 +400,7 @@ void CoarseInitializer::debugPlot(int lvl, std::vector<IOWrap::Output3DWrapper*>
  * @param refToNew [in] 参考帧到当前帧的位姿
  * @param refToNew_aff [in] 参考帧到当前帧的光度变换
  * @param plot [in]
- * @return Vec3f 返回能量函数、和特征像素数目
+ * @return Vec3f 返回能量函数、alpha误差和特征像素数目
  */
 Vec3f CoarseInitializer::calcResAndGS(
 		int lvl, Mat88f &H_out, Vec8f &b_out,
@@ -546,7 +575,7 @@ Vec3f CoarseInitializer::calcResAndGS(
                 }
 
 
-				/** 计算像素的残差
+				/** 计算像素的残差 r_i2j
 				 *  residual_i2j = w_huber{I_j(x_j) - (a_ji * I_i(x_i) + b_ji)}
 				 * 
 				 *  a_ji = \frac{t_j * exp(a_j)}{t_i * exp(a_i)}
@@ -565,7 +594,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 				// huberTH * (2 * |residual| - huberTH) | residual >= huberTH
 				energy += hw * residual * residual * (2 - hw);
 
-				/** 残差关于位姿的梯度 
+				/** 残差关于位姿的梯度 dr_d\ksi_i2j
 				 *  dr_d\ksi_i2j = dr_dx_j * dx_j_d\ksi_i2j
 				 * 
 				 *  dr_dx_j = w_huber * dI(x_j)_dx_j(图像梯度) 
@@ -638,7 +667,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 				 * 	                - I(x_j)_dx * f_x * v_j' + I(x_j)_dy * f_y * u_j'                ]
 				 *                  
 				 */
-				/** 残差关于第一帧点逆深度的梯度 
+				/** 残差关于第一帧点逆深度的梯度 dr_did_i
 				 *  dr_did_i = dr_dx_j * dx_j_did_i
 				 * 
 				 *  dr_dx_j = w_huber * dI(x_j)_dx_j(图像梯度) 
@@ -690,7 +719,7 @@ Vec3f CoarseInitializer::calcResAndGS(
                 if(hw < 1) hw = sqrtf(hw);
                 float dxInterp = hw * hitColor[1] * fxl;
                 float dyInterp = hw * hitColor[2] * fyl;
-				// 残差关于i2j位姿变换的梯度
+				// 残差关于i2j位姿变换(t_x,t_y,t_z,v_x,v_y,v_z)的梯度
                 dp0[idx] = new_idepth * dxInterp;
                 dp1[idx] = new_idepth * dyInterp;
                 dp2[idx] = -new_idepth * (u * dxInterp + v * dyInterp);
@@ -795,7 +824,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 
 	// calculate alpha energy, and decide if we cap it.
-	// 计算
+	// 计算alpha energy，决定是否对其进行clamp
 	Accumulator11 EAlpha;
 	EAlpha.initialize();
 	// 遍历特征像素
@@ -817,6 +846,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 		}
 	}
 	EAlpha.finish();
+	// alphaW * (EAlpha.A + ||t||_2 * npts)
 	float alphaEnergy = alphaW*(EAlpha.A + refToNew.translation().squaredNorm() * npts);
 
 	//printf("AE = %f * %f + %f\n", alphaW, EAlpha.A, refToNew.translation().squaredNorm() * npts);
@@ -825,6 +855,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 	// compute alpha opt.
 	float alphaOpt;
 	// clamp alphaEnergy to alphaK*npts
+	// 说明此时位移足够大，不需要alphaOpt正则项
 	if(alphaEnergy > alphaK*npts)
 	{
 		alphaOpt = 0;
@@ -871,11 +902,15 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 		point->lastHessian_new = JbBuffer_new[i][9];
 
+		// 初始化时位移不够大时，增加alphaOpt的正则项
+		// 当位移足够大时，alphaOpt=0
 		JbBuffer_new[i][8] += alphaOpt*(point->idepth_new - 1);
 		JbBuffer_new[i][9] += alphaOpt;
 
+		// 初始化时位移足够大
 		if(alphaOpt==0)
 		{
+			// 增加逆深度的正则项
 			JbBuffer_new[i][8] += couplingWeight*(point->idepth_new - point->iR);
 			JbBuffer_new[i][9] += couplingWeight;
 		}
@@ -907,7 +942,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 	b_out_sc = acc9SC.H.topRightCorner<8,1>();// / acc9.num;
 
 
-	// TODO: ?对平移部分进行处理
+	// 增加alphaOpt的正则项
 	H_out(0,0) += alphaOpt*npts;
 	H_out(1,1) += alphaOpt*npts;
 	H_out(2,2) += alphaOpt*npts;
@@ -936,7 +971,7 @@ Vec3f CoarseInitializer::calcResAndGS(
         num += E.num;
     }
 
-	// 输出能量值, ？, 有效特征像素数量 
+	// 总的能量误差, alpha误差, 有效特征像素数量 
 	return Vec3f(A, alphaEnergy, num);
 }
 
@@ -963,6 +998,12 @@ float CoarseInitializer::rescale()
 }
 
 
+/**
+ * @brief 计算lvl层的能量误差正则化部分
+ * 
+ * @param lvl 
+ * @return Vec3f 
+ */
 Vec3f CoarseInitializer::calcEC(int lvl)
 {
 	if(!snapped) return Vec3f(0,0,numPoints[lvl]);
@@ -1034,18 +1075,24 @@ void CoarseInitializer::optReg(int lvl)
 }
 
 
-
+/**
+ * @brief 将逆深度信息(更新iR, idepth, idepth_new)从srcLvl层传播到srcLvl+1层
+ * 
+ * @param srcLvl 当前金字塔
+ */
 void CoarseInitializer::propagateUp(int srcLvl)
 {
 	assert(srcLvl+1<pyrLevelsUsed);
 	// set idepth of target
 
+	// 获取srcLvl(当前层)和srcLvl+1(上一层)层的特征像素数量
 	int nptss= numPoints[srcLvl];
 	int nptst= numPoints[srcLvl+1];
 	Pnt* ptss = points[srcLvl];
 	Pnt* ptst = points[srcLvl+1];
 
 	// set to zero.
+	// 初始化srcLvl+1层(目标层)特征像素的逆深度信息
 	for(int i=0;i<nptst;i++)
 	{
 		Pnt* parent = ptst+i;
@@ -1053,16 +1100,19 @@ void CoarseInitializer::propagateUp(int srcLvl)
 		parent->iRSumNum=0;
 	}
 
+	// 遍历srcLvl层(当前层)的所有特征像素
 	for(int i=0;i<nptss;i++)
 	{
 		Pnt* point = ptss+i;
 		if(!point->isGood) continue;
 
+		// 更新srcLvl+1层父特征像素的逆深度信息
 		Pnt* parent = ptst + point->parent;
 		parent->iR += point->iR * point->lastHessian;
 		parent->iRSumNum += point->lastHessian;
 	}
 
+	// 遍历srcLvl+1层(目标层)特征像素
 	for(int i=0;i<nptst;i++)
 	{
 		Pnt* parent = ptst+i;
@@ -1310,6 +1360,13 @@ void CoarseInitializer::resetPoints(int lvl)
 	}
 }
 
+/**
+ * @brief 进行一次迭代更新，求解delta_idi
+ * 
+ * @param lvl 
+ * @param lambda 
+ * @param inc [in] schur complement后优化方程的解delta_x_i2j
+ */
 void CoarseInitializer::doStep(int lvl, float lambda, Vec8f inc)
 {
 
@@ -1317,28 +1374,50 @@ void CoarseInitializer::doStep(int lvl, float lambda, Vec8f inc)
 	const float idMaxStep = 1e10;
 	Pnt* pts = points[lvl];
 	int npts = numPoints[lvl];
+
+
+	// 遍历特征像素
 	for(int i=0;i<npts;i++)
 	{
 		if(!pts[i].isGood) continue;
 
-
+		/** 将求解得到的delta_x_i2j(inc)代入，求解delta_idi
+		 *  [H_id_id H_id_x] * [delta_id  delta_x_i2j]^T = - J_id^T * r_i2j 
+		 *  ==> 
+		 *  H_id_id * delta_idi + H_id_x * delta_x_i2j = - J_id^T * r_i2j 
+		 *  ==>
+		 *  delta_idi = - H_id_id^(-1) * (H_id_x * delta_x_i2j + J_id^T * r_i2j)
+		 *  --------------------------------------------
+		 *  inc : delta_x_i2j
+		 *  JbBuffer[i].head<8>() : 第i个特征像素的前8列(0-7)对应H_id_x的第8*i行到第8*i+7行
+		 *  JbBuffer[i][8] : 对应J_id^T * r_i2j的第8*i行到第8*i+7行
+		 *  JbBuffer[i][9] : 对应H_id_id^(-1) (i,i)位置上的scalar
+		 */
 		float b = JbBuffer[i][8] + JbBuffer[i].head<8>().dot(inc);
 		float step = - b * JbBuffer[i][9] / (1+lambda);
 
 
 		float maxstep = maxPixelStep*pts[i].maxstep;
+		// clamp
 		if(maxstep > idMaxStep) maxstep=idMaxStep;
 
 		if(step >  maxstep) step = maxstep;
 		if(step < -maxstep) step = -maxstep;
 
 		float newIdepth = pts[i].idepth + step;
+		// clamp
 		if(newIdepth < 1e-3 ) newIdepth = 1e-3;
 		if(newIdepth > 50) newIdepth = 50;
+		// 更新特征像素的逆深度
 		pts[i].idepth_new = newIdepth;
 	}
 
 }
+/**
+ * @brief 更新lvl层的特征像素属性
+ * 
+ * @param lvl 
+ */
 void CoarseInitializer::applyStep(int lvl)
 {
 	Pnt* pts = points[lvl];
@@ -1357,6 +1436,7 @@ void CoarseInitializer::applyStep(int lvl)
 		pts[i].idepth = pts[i].idepth_new;
 		pts[i].lastHessian = pts[i].lastHessian_new;
 	}
+	// 交换JbBuffer和JbBuffer_new
 	std::swap<Vec10f*>(JbBuffer, JbBuffer_new);
 }
 

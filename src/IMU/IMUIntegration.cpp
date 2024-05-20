@@ -148,10 +148,16 @@ void IMUIntegration::finishKeyframeOperations(int keyframeId)
     }
 }
 
+/**
+ * @brief 将IMU数据添加到BA中
+ * 
+ * @param imuData 
+ */
 void IMUIntegration::addIMUDataToBA(const IMUData& imuData)
 {
     dmvio::TimeMeasurement timeMeasurement("addIMUDataToBA");
     integrateIMUData(imuData, *preintegratedBACurr);
+    // 更新lastIMU数据
     lastIMUData = imuData;
 }
 
