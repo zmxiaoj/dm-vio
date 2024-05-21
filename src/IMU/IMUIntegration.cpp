@@ -387,8 +387,15 @@ void IMUIntegration::newFrameEnergyTH(float& energyThreshold)
     }
 }
 
+/**
+ * @brief 
+ * 
+ * @param frameShell 
+ * @param willBecomeKeyframe [in] bool 标记是否为关键帧 
+ */
 void IMUIntegration::finishCoarseTracking(const dso::FrameShell& frameShell, bool willBecomeKeyframe)
 {
+    // 如果指针非空
     if(imuInitializer)
     {
         imuInitializer->addPose(frameShell, willBecomeKeyframe);

@@ -45,6 +45,11 @@ bool EFAdjointsValid = false;
 bool EFIndicesValid = false;
 bool EFDeltaValid = false;
 
+/**
+ * @brief 计算adHostF和adTargetF
+ * 
+ * @param Hcalib 
+ */
 void EnergyFunctional::setAdjointsF(CalibHessian* Hcalib)
 {
 
@@ -449,20 +454,33 @@ EFResidual* EnergyFunctional::insertResidual(PointFrameResidual* r)
 	r->efResidual = efr;
 	return efr;
 }
+/**
+ * @brief 向EnergyFunctional中插入一个FrameHessian对象，修改正规方程，重新排ID，共视关系
+ * 
+ * @param fh 
+ * @param Hcalib 
+ * @return EFFrame* 
+ */
 EFFrame* EnergyFunctional::insertFrame(FrameHessian* fh, CalibHessian* Hcalib)
 {
+    // 创建EFFrame对象
 	EFFrame* eff = new EFFrame(fh);
+    // 更新id
 	eff->idx = frames.size();
+    // vector 加入EnergyFunctional的EFFrame对象
 	frames.push_back(eff);
 
+    // 记录加入EFFrame对象的数量
 	nFrames++;
 	fh->efFrame = eff;
 
+    // 一帧8个参数+4个相机参数，边缘化掉一帧少8个 
 	assert(HM.cols() == 8*nFrames+CPARS-8);
 	bM.conservativeResize(8*nFrames+CPARS);
     bMForGTSAM.conservativeResize(8 * nFrames + CPARS);
 	HM.conservativeResize(8*nFrames+CPARS,8*nFrames+CPARS);
     HMForGTSAM.conservativeResize(8 * nFrames + CPARS, 8 * nFrames + CPARS);
+    // 将新加入的帧的Hessian和b设置为0
 	bM.tail<8>().setZero();
     bMForGTSAM.tail<8>().setZero();
 	HM.rightCols<8>().setZero();
@@ -474,12 +492,16 @@ EFFrame* EnergyFunctional::insertFrame(FrameHessian* fh, CalibHessian* Hcalib)
 	EFAdjointsValid=false;
 	EFDeltaValid=false;
 
+    // 设置伴随矩阵
 	setAdjointsF(Hcalib);
-	makeIDX();
+	// 设置ID
+    makeIDX();
 
 
+    // 遍历已经存在的帧，更新共视关系
 	for(EFFrame* fh2 : frames)
 	{
+        // 高32位 eff:Host帧 低32位 fh2:Target帧
         connectivityMap[(((uint64_t)eff->frameID) << 32) + ((uint64_t)fh2->frameID)] = Eigen::Vector2i(0,0);
 		if(fh2 != eff)
             connectivityMap[(((uint64_t)fh2->frameID) << 32) + ((uint64_t)eff->frameID)] = Eigen::Vector2i(0,0);
@@ -487,6 +509,12 @@ EFFrame* EnergyFunctional::insertFrame(FrameHessian* fh, CalibHessian* Hcalib)
 
 	return eff;
 }
+/**
+ * @brief 向EnergyFunctional中插入一个PointHessian对象
+ * 
+ * @param ph 
+ * @return EFPoint* 
+ */
 EFPoint* EnergyFunctional::insertPoint(PointHessian* ph)
 {
 	EFPoint* efp = new EFPoint(ph, ph->host->efFrame);
@@ -999,17 +1027,24 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda, CalibHessian* 
 
 
 }
+/**
+ * @brief 更新EFFrame, EFPoint, EFResidual的ID
+ * 
+ */
 void EnergyFunctional::makeIDX()
 {
+    // 重排frames中EFFrame的ID
     for(unsigned int idx=0;idx<frames.size();idx++)
         frames[idx]->idx = idx;
 
     allPoints.clear();
 
+    // 遍历EFFrame中全部的EFPoint的全部残差EFResidual
     for(EFFrame* f : frames)
         for(EFPoint* p : f->points)
         {
             allPoints.push_back(p);
+            // 更新残差的ID
             for(EFResidual* r : p->residualsAll)
             {
                 r->hostIDX = r->host->idx;

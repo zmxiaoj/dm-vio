@@ -564,32 +564,46 @@ std::pair<Vec4, bool> FullSystem::trackNewCoarse(FrameHessian* fh, Sophus::SE3 *
 	return std::make_pair(Vec4(achievedRes[0], flowVecs[0], flowVecs[1], flowVecs[2]), trackingGoodRet);
 }
 
+/**
+ * @brief 更新未成熟像素
+ * 
+ * @param fh 
+ */
 void FullSystem::traceNewCoarse(FrameHessian* fh)
 {
     dmvio::TimeMeasurement timeMeasurement("traceNewCoarse");
+	// 获取mapMutex锁
 	boost::unique_lock<boost::mutex> lock(mapMutex);
 
+	// ?oob=out_of_bounds
 	int trace_total=0, trace_good=0, trace_oob=0, trace_out=0, trace_skip=0, trace_badcondition=0, trace_uninitialized=0;
 
+	// 当前层的相机内参
 	Mat33f K = Mat33f::Identity();
 	K(0,0) = Hcalib.fxl();
 	K(1,1) = Hcalib.fyl();
 	K(0,2) = Hcalib.cxl();
 	K(1,2) = Hcalib.cyl();
 
+	// 遍历全部标记为ACTIVE的帧
 	for(FrameHessian* host : frameHessians)		// go through all active frames
 	{
-
+		// T_host2current = T_world2current * T_host2world
 		SE3 hostToNew = fh->PRE_worldToCam * host->PRE_camToWorld;
+		// K * R_host2current * K^(-1)
 		Mat33f KRKi = K * hostToNew.rotationMatrix().cast<float>() * K.inverse();
+		// K * t_host2current
 		Vec3f Kt = K * hostToNew.translation().cast<float>();
 
 		Vec2f aff = AffLight::fromToVecExposure(host->ab_exposure, fh->ab_exposure, host->aff_g2l(), fh->aff_g2l()).cast<float>();
 
+		// 遍历全部未成熟像素
 		for(ImmaturePoint* ph : host->immaturePoints)
 		{
+			// 对未成熟像素进行极线搜索
 			ph->traceOn(fh, KRKi, Kt, aff, &Hcalib, false );
 
+			// 根据ImmaturePoint对象的状态更新统计结果
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_GOOD) trace_good++;
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_BADCONDITION) trace_badcondition++;
 			if(ph->lastTraceStatus==ImmaturePointStatus::IPS_OOB) trace_oob++;
@@ -1006,7 +1020,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
 			// 跟踪成功，完成初始化
 			if (initDone)    // if SNAPPED
             {
-				// 
+				// 根据初始化更新相关信息
                 initializeFromInitializer(fh);
                 if(setting_useIMU && linearizeOperation)
                 {
@@ -1016,7 +1030,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
                 initMeasure.end();
                 for(IOWrap::Output3DWrapper* ow : outputWrapper)
                     ow->publishSystemStatus(dmvio::VISUAL_ONLY);
-				// 将帧信息传递给后端
+				// 将帧信息传递给后端，创建关键帧
                 deliverTrackedFrame(fh, true);
             } 
 			// 跟踪失败
@@ -1208,6 +1222,12 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
 		return;
 	}
 }
+/**
+ * @brief 实现多线程的数据输入
+ * 
+ * @param fh 
+ * @param needKF [in] bool，标记需要创建关键帧
+ */
 void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
 {
     dmvio::TimeMeasurement timeMeasurement("deliverTrackedFrame");
@@ -1220,7 +1240,8 @@ void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
     {
         std::cout << "Frame history size: " << allFrameHistory.size() << std::endl;
     }
-    if((needKF || (!secondKeyframeDone && !linearizeOperation)) && setting_useIMU && !alreadyPreparedKF)
+    // 判断是否创建关键帧
+	if((needKF || (!secondKeyframeDone && !linearizeOperation)) && setting_useIMU && !alreadyPreparedKF)
     {
         // prepareKeyframe tells the IMU-Integration that this frame will become a keyframe. -> don' marginalize it during addIMUData.
         // Also resets the IMU preintegration for the BA.
@@ -1242,6 +1263,7 @@ void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
         }
     }
 
+	// 顺序执行
 	if(linearizeOperation)
 	{
 		if(goStepByStep && lastRefStopID != coarseTracker->refFrameID)
@@ -1259,20 +1281,24 @@ void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
 		else handleKey( IOWrap::waitKey(1) );
 
 
-
+		// 需要创建关键帧
 		if(needKF)
 		{
             if(setting_useIMU)
             {
+				// 标记创建关键帧
                 imuIntegration.keyframeCreated(fh->shell->id);
             }
             makeKeyFrame(fh);
 		}
 		else makeNonKeyFrame(fh);
 	}
+	// 非顺序执行
 	else
 	{
+		// 创建unique_lock对象lock，自动锁定互斥锁trackMapSyncMutex
 		boost::unique_lock<boost::mutex> lock(trackMapSyncMutex);
+		// 将帧信息添加到unmappedTrackedFrames中
 		unmappedTrackedFrames.push_back(fh);
 
 		// If the prepared KF is still in the queue right now the current frame will become a KF instead.
@@ -1293,6 +1319,7 @@ void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
 
 		while(coarseTracker_forNewKF->refFrameID == -1 && coarseTracker->refFrameID == -1 )
 		{
+			// 当没有跟踪的图像, 就一直阻塞trackMapSyncMutex, 直到notify
 			mappedFrameSignal.wait(lock);
 		}
 
@@ -1300,6 +1327,10 @@ void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
 	}
 }
 
+/**
+ * @brief 建图线程
+ * 
+ */
 void FullSystem::mappingLoop()
 {
 	boost::unique_lock<boost::mutex> lock(trackMapSyncMutex);
@@ -1416,11 +1447,17 @@ void FullSystem::blockUntilMappingIsFinished()
 
 }
 
+/**
+ * @brief 更新位姿，优化ImmaturePoints的逆深度范围
+ * 
+ * @param fh 
+ */
 void FullSystem::makeNonKeyFrame( FrameHessian* fh)
 {
     dmvio::TimeMeasurement timeMeasurement("makeNonKeyframe");
 	// needs to be set by mapping thread. no lock required since we are in mapping thread.
 	{
+		// 通过shell对象设置当前位姿
 		boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
 		assert(fh->shell->trackingRef != 0);
 		fh->shell->camToWorld = fh->shell->trackingRef->camToWorld * fh->shell->camToTrackingRef;
@@ -1431,15 +1468,22 @@ void FullSystem::makeNonKeyFrame( FrameHessian* fh)
 	delete fh;
 }
 
+/**
+ * @brief 生成关键帧, 优化, 激活点, 提取点, 边缘化关键帧
+ * 
+ * @param fh 
+ */
 void FullSystem::makeKeyFrame( FrameHessian* fh)
 {
     dmvio::TimeMeasurement timeMeasurement("makeKeyframe");
 	// needs to be set by mapping thread
 	{
+		// 通过shell对象设置当前位姿
 		boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
 		assert(fh->shell->trackingRef != 0);
 		fh->shell->camToWorld = fh->shell->trackingRef->camToWorld * fh->shell->camToTrackingRef;
 		fh->setEvalPT_scaled(fh->shell->camToWorld.inverse(),fh->shell->aff_g2l);
+		// 更新上一关键帧后的帧数
 		int prevKFId = fh->shell->trackingRef->id;
 		int framesBetweenKFs = fh->shell->id - prevKFId - 1;
         if(!setting_debugout_runquiet)
@@ -1450,6 +1494,7 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 	traceNewCoarse(fh);
 
+	// 获取互斥锁对象mapMutex的所有权
 	boost::unique_lock<boost::mutex> lock(mapMutex);
 
 	// =========================== Flag Frames to be Marginalized. =========================
@@ -1457,7 +1502,8 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 	// =========================== add New Frame to Hessian Struct. =========================
-    dmvio::TimeMeasurement timeMeasurementAddFrame("newFrameAndNewResidualsForOldPoints");
+    // 添加新的frameHessian
+	dmvio::TimeMeasurement timeMeasurementAddFrame("newFrameAndNewResidualsForOldPoints");
 	fh->idx = frameHessians.size();
 	frameHessians.push_back(fh);
 	fh->frameID = allKeyFramesHistory.size();
@@ -1471,8 +1517,11 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 	// =========================== add new residuals for old points =========================
 	int numFwdResAdde=0;
+	// vector 地图内关键帧容器，保存FrameHessian对象指针
+	// 遍历全部frameHessian中的FrameHessian对象
 	for(FrameHessian* fh1 : frameHessians)		// go through all active frames
 	{
+		// 跳过当前帧
 		if(fh1 == fh) continue;
 		for(PointHessian* ph : fh1->pointHessians)
 		{
@@ -1638,27 +1687,40 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
 
 /**
- * @brief 
+ * @brief 根据初始化设定关键帧等信息，用于后续跟踪
  * 
  * @param newFrame 
  */
 void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 {
+	// 对mapMutex加锁
 	boost::unique_lock<boost::mutex> lock(mapMutex);
 
     // add firstframe.
+	// ***step1*** 把第一帧设置成关键帧, 加入队列, 加入EnergyFunctional
+	// 获取初始化的第一帧
 	FrameHessian* firstFrame = coarseInitializer->firstFrame;
+	// 设置第一帧的idx(从0开始)
 	firstFrame->idx = frameHessians.size();
+	// vector 地图内关键帧容器，保存FrameHessian对象指针
 	frameHessians.push_back(firstFrame);
+	// 设置历史关键帧id
 	firstFrame->frameID = allKeyFramesHistory.size();
+	// vector 所有历史关键帧，保存FrameShell对象指针
 	allKeyFramesHistory.push_back(firstFrame->shell);
+	// 将第一帧加入EnergyFunctional
 	ef->insertFrame(firstFrame, &Hcalib);
+	// 设置预计算值
 	setPrecalcValues();
 
+	// 添加第一帧到BA中
 	baIntegration->addFirstBAFrame(firstFrame->shell->id);
 
+	// 申请内存空间(20%的像素数目)保存点
 	firstFrame->pointHessians.reserve(wG[0]*hG[0]*0.2f);
+	// 被边缘化
 	firstFrame->pointHessiansMarginalized.reserve(wG[0]*hG[0]*0.2f);
+	// 丢掉的点
 	firstFrame->pointHessiansOut.reserve(wG[0]*hG[0]*0.2f);
 
 
@@ -1678,6 +1740,7 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 
     float rescaleFactor = 1;
 
+	// 计算尺度因子
 	rescaleFactor = 1 / (sumID / numID);
 
     SE3 firstToNew = coarseInitializer->thisToNext;
@@ -1685,23 +1748,30 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
     firstToNew.translation() /= rescaleFactor;
 
 	// randomly sub-select the points I need.
+	// 目标像素数目 / 实际特征像素数目
 	float keepPercentage = setting_desiredPointDensity / coarseInitializer->numPoints[0];
 
     if(!setting_debugout_runquiet)
         printf("Initialization: keep %.1f%% (need %d, have %d)!\n", 100*keepPercentage,
                 (int)(setting_desiredPointDensity), coarseInitializer->numPoints[0] );
 
+	// 遍历第一帧的特征像素
 	for(int i=0;i<coarseInitializer->numPoints[0];i++)
 	{
+		// 提取特征像素少于keepPercentage，不执行
+		// 提取特征像素大于keepPercentage，随机跳过
 		if(rand()/(float)RAND_MAX > keepPercentage) continue;
 
 		Pnt* point = coarseInitializer->points[0]+i;
+		// 创建ImmaturePoint对象
 		ImmaturePoint* pt = new ImmaturePoint(point->u+0.5f,point->v+0.5f,firstFrame,point->my_type, &Hcalib);
 
+		// 如果能量值不是有限值，删除特征像素
 		if(!std::isfinite(pt->energyTH)) { delete pt; continue; }
 
 
 		pt->idepth_max=pt->idepth_min=1;
+		// 创建PointHessian对象(使用ImmaturePoint作为参数)
 		PointHessian* ph = new PointHessian(pt, &Hcalib);
 		delete pt;
 		if(!std::isfinite(ph->energyTH)) {delete ph; continue;}
@@ -1709,16 +1779,21 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
         ph->setIdepthScaled(point->iR * rescaleFactor);
 		ph->setIdepthZero(ph->idepth);
 		ph->hasDepthPrior=true;
+		// 标记点的状态为活跃点
 		ph->setPointStatus(PointHessian::ACTIVE);
 
 		firstFrame->pointHessians.push_back(ph);
+		// 向ef中插入
 		ef->insertPoint(ph);
 	}
 
 
 	// really no lock required, as we are initializing.
 	{
+		// 对shellPoseMutex加锁，不受到mapMutex的影响
 		boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
+		// 更新第一帧的位姿
+		// T_current2world = T_first2world
         firstFrame->shell->camToWorld = firstPose;
 		firstFrame->shell->aff_g2l = AffLight(0,0);
 		firstFrame->setEvalPT_scaled(firstFrame->shell->camToWorld.inverse(),firstFrame->shell->aff_g2l);
@@ -1726,15 +1801,20 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 		firstFrame->shell->camToTrackingRef = SE3();
 		firstFrame->shell->keyframeId = 0;
 
+		// 更新当前帧的位姿
+		// T_current2world = T_first2world * T_current2first
 		newFrame->shell->camToWorld = firstPose * firstToNew.inverse();
 		newFrame->shell->aff_g2l = AffLight(0,0);
         newFrame->setEvalPT_scaled(newFrame->shell->camToWorld.inverse(),newFrame->shell->aff_g2l);
 		newFrame->shell->trackingRef = firstFrame->shell;
 		newFrame->shell->camToTrackingRef = firstToNew.inverse();
 
+		// 释放互斥锁对象shellPoseMutex
     }
+	// 结束粗跟踪
     imuIntegration.finishCoarseTracking(*(newFrame->shell), true);
 
+	// 标记初始化完成
     initialized=true;
 	printf("INITIALIZE FROM INITIALIZER (%d pts)!\n", (int)firstFrame->pointHessians.size());
 }
@@ -1769,6 +1849,10 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 
 
 
+/**
+ * @brief 设置预计算值
+ * 
+ */
 void FullSystem::setPrecalcValues()
 {
 	for(FrameHessian* fh : frameHessians)

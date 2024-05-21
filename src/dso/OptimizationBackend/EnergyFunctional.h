@@ -102,6 +102,7 @@ public:
 
 	void setAdjointsF(CalibHessian* Hcalib);
 
+	// vector 加入EnergyFunctional的EFFrame对象
 	std::vector<EFFrame*> frames;
 	int nPoints, nFrames, nResiduals;
 

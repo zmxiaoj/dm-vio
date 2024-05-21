@@ -279,6 +279,7 @@ private:
 
 	// ================== changed by mapper-thread. protected by mapMutex ===============
 	boost::mutex mapMutex;
+	// vector 所有历史关键帧，保存FrameShell对象指针
 	std::vector<FrameShell*> allKeyFramesHistory;
 
 	EnergyFunctional* ef;
@@ -288,6 +289,7 @@ private:
 	PixelSelector* pixelSelector;
 	CoarseDistanceMap* coarseDistanceMap;
 
+	// vector 地图内关键帧容器，保存FrameHessian对象指针
 	std::vector<FrameHessian*> frameHessians;	// ONLY changed in marginalizeFrame and addFrame.
 	std::vector<PointFrameResidual*> activeResiduals;
 	float currentMinActDist;

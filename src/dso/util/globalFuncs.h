@@ -108,7 +108,7 @@ EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement43(const Eigen::Vector
  * @param x 
  * @param y 
  * @param width 
- * @return Eigen::Vector3f [out] 像素值
+ * @return Eigen::Vector3f [out] (像素值, 水平梯度, 垂直梯度)
  */
 EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement33(const Eigen::Vector3f* const mat, const float x, const float y, const int width)
 {
@@ -221,6 +221,15 @@ EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement13BiLin(const float* c
 			botInt-topInt);
 }
 
+/**
+ * @brief Get the Interpolated Element33 Bi Lin object
+ * 
+ * @param mat 
+ * @param x 
+ * @param y 
+ * @param width 
+ * @return Eigen::Vector3f (像素值, 水平梯度均值, 垂直梯度均值)
+ */
 EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement33BiLin(const Eigen::Vector3f* const mat, const float x, const float y, const int width)
 {
 	int ix = (int)x;
@@ -243,7 +252,9 @@ EIGEN_ALWAYS_INLINE Eigen::Vector3f getInterpolatedElement33BiLin(const Eigen::V
 
 	return Eigen::Vector3f(
 			dx * rightInt + (1-dx) * leftInt,
+			// 水平梯度均值
 			rightInt-leftInt,
+			// 垂直梯度均值
 			botInt-topInt);
 }
 EIGEN_ALWAYS_INLINE float getInterpolatedElement11Cub(const float* const p, const float x)	// for x=0, this returns p[1].

@@ -177,6 +177,7 @@ bool  setting_selectDirectionDistribution = true;
 
 
 /* settings controling initial immature point tracking */
+// 对ImmaturePoint进行极线搜索的最大长度系数(与图像分辨率有关)
 float setting_maxPixSearch = 0.027; // max length of the ep. line segment searched during immature point tracking. relative to image resolution.
 float setting_minTraceQuality = 3;
 int setting_minTraceTestRadius = 2;
