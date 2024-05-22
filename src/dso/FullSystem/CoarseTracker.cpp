@@ -958,7 +958,12 @@ CoarseDistanceMap::~CoarseDistanceMap()
 
 
 
-
+/**
+ * @brief CoarseDistanceMap对象创建地图关键帧到目标关键帧的距离场图
+ * 
+ * @param frameHessians [in] 地图中的关键帧 
+ * @param frame [in] 目标关键帧
+ */
 void CoarseDistanceMap::makeDistanceMap(
 		std::vector<FrameHessian*> frameHessians,
 		FrameHessian* frame)
@@ -966,6 +971,7 @@ void CoarseDistanceMap::makeDistanceMap(
 	int w1 = w[1];
 	int h1 = h[1];
 	int wh1 = w1*h1;
+	// 初始化fwdWarpedIDDistFinal数组
 	for(int i=0;i<wh1;i++)
 		fwdWarpedIDDistFinal[i] = 1000;
 
@@ -973,21 +979,26 @@ void CoarseDistanceMap::makeDistanceMap(
 	// make coarse tracking templates for latstRef.
 	int numItems = 0;
 
+	// 遍历frameHessians地图中的关键帧
 	for(FrameHessian* fh : frameHessians)
 	{
 		if(frame == fh) continue;
 
+		// T_current2target 当前帧到目标关键帧frame的变换
 		SE3 fhToNew = frame->PRE_worldToCam * fh->PRE_camToWorld;
 		Mat33f KRKi = (K[1] * fhToNew.rotationMatrix().cast<float>() * Ki[0]);
 		Vec3f Kt = (K[1] * fhToNew.translation().cast<float>());
 
+		// 
 		for(PointHessian* ph : fh->pointHessians)
 		{
 			assert(ph->status == PointHessian::ACTIVE);
+			// 投影到frame帧
 			Vec3f ptp = KRKi * Vec3f(ph->u, ph->v, 1) + Kt*ph->idepth_scaled;
 			int u = ptp[0] / ptp[2] + 0.5f;
 			int v = ptp[1] / ptp[2] + 0.5f;
 			if(!(u > 0 && v > 0 && u < w[1] && v < h[1])) continue;
+			// 有效点标记为0
 			fwdWarpedIDDistFinal[u+w1*v]=0;
 			bfsList1[numItems] = Eigen::Vector2i(u,v);
 			numItems++;

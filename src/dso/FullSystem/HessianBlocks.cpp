@@ -210,11 +210,19 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 	}
 }
 
+/**
+ * @brief 
+ * 
+ * @param host 
+ * @param target 
+ * @param HCalib 
+ */
 void FrameFramePrecalc::set(FrameHessian* host, FrameHessian* target, CalibHessian* HCalib )
 {
 	this->host = host;
 	this->target = target;
 
+	// T_host2target = T_world2target * T_host2world
 	SE3 leftToLeft_0 = target->get_worldToCam_evalPT() * host->get_worldToCam_evalPT().inverse();
 	PRE_RTll_0 = (leftToLeft_0.rotationMatrix()).cast<float>();
 	PRE_tTll_0 = (leftToLeft_0.translation()).cast<float>();

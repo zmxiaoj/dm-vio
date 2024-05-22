@@ -441,7 +441,12 @@ double EnergyFunctional::calcLEnergyF_MT()
 }
 
 
-
+/**
+ * @brief 向EnergyFunctional中插入一个PointFrameResidual对象
+ * 
+ * @param r 
+ * @return EFResidual* 
+ */
 EFResidual* EnergyFunctional::insertResidual(PointFrameResidual* r)
 {
 	EFResidual* efr = new EFResidual(r, r->point->efPoint, r->host->efFrame, r->target->efFrame);

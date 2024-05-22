@@ -58,9 +58,16 @@ namespace dso
 
 
 
+/**
+ * @brief 标记需要进行边缘化的点
+ * 对于关键帧的边缘化策略 1. 有效点只剩下5%的; 2. 和最新关键帧曝光变化大于0.7; 3. 距离最远的关键帧
+ * 
+ * @param newFH 
+ */
 void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 {
     dmvio::TimeMeasurement timeMeasurement("flagFramesForMarginalization");
+	// 将frameHessians中超出最大帧数的帧标记为需要边缘化
 	if(setting_minFrameAge > setting_maxFrames)
 	{
 		for(int i=setting_maxFrames;i<(int)frameHessians.size();i++)
@@ -74,17 +81,20 @@ void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 
 	int flagged = 0;
 	// marginalize all frames that have not enough points.
+	// 边缘化全部点数不足的帧
 	for(int i=0;i<(int)frameHessians.size();i++)
 	{
 		FrameHessian* fh = frameHessians[i];
+		// 有效点的数目
 		int in = fh->pointHessians.size() + fh->immaturePoints.size();
+		// 无效点(边缘化及被丢掉)的数目
 		int out = fh->pointHessiansMarginalized.size() + fh->pointHessiansOut.size();
 
 
 		Vec2 refToFh=AffLight::fromToVecExposure(frameHessians.back()->ab_exposure, fh->ab_exposure,
 				frameHessians.back()->aff_g2l(), fh->aff_g2l());
 
-
+		// (有效点少于总点数的5% 或 光度系数a超过0.7) 且 剩余帧数大于最小帧数(5)
 		if( (in < setting_minPointsRemaining *(in+out) || fabs(logf((float)refToFh[0])) > setting_maxLogAffFacInWindow)
 				&& ((int)frameHessians.size())-flagged > setting_minFrames)
 		{
@@ -109,15 +119,19 @@ void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 	}
 
 	// marginalize one.
+	// 边缘化一帧，剩余帧数超过最大帧数(7)
 	if((int)frameHessians.size()-flagged >= setting_maxFrames)
 	{
 		double smallestScore = 1;
 		FrameHessian* toMarginalize=0;
+		// 最新关键帧
 		FrameHessian* latest = frameHessians.back();
 
-
+		// 遍历全部关键帧
+		// 与最新帧距离占所有目标帧最大(离得最远的)的被边缘化掉
 		for(FrameHessian* fh : frameHessians)
 		{
+			// 如果当前帧是最新帧或者与最近新帧时间上过近，则跳过
 			if(fh->frameID > latest->frameID-setting_minFrameAge || fh->frameID == 0) continue;
 			//if(fh==frameHessians.front() == 0) continue;
 
@@ -125,6 +139,7 @@ void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 			for(FrameFramePrecalc &ffh : fh->targetPrecalc)
 			{
 				if(ffh.target->frameID > latest->frameID-setting_minFrameAge+1 || ffh.target == ffh.host) continue;
+				// distanceLL为帧间距离(平移向量的范数)
 				distScore += 1/(1e-5+ffh.distanceLL);
 
 			}
