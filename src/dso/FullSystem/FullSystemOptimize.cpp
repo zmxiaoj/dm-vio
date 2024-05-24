@@ -413,7 +413,12 @@ void FullSystem::printOptRes(const Vec3 &res, double resL, double resM, double r
 
 }
 
-
+/**
+ * @brief 
+ * 
+ * @param mnumOptIts [in] 迭代次数(default=6)
+ * @return float 
+ */
 float FullSystem::optimize(int mnumOptIts)
 {
     dmvio::TimeMeasurement timeMeasurement("FullSystemOptimize");
@@ -427,7 +432,7 @@ float FullSystem::optimize(int mnumOptIts)
 
 
 	// get statistics and active residuals.
-
+	// 找出未线性化(边缘化)的残差, 加入activeResiduals
 	activeResiduals.clear();
 	int numPoints = 0;
 	int numLRes = 0;
@@ -436,6 +441,7 @@ float FullSystem::optimize(int mnumOptIts)
 		{
 			for(PointFrameResidual* r : ph->residuals)
 			{
+				// 未线性化
 				if(!r->efResidual->isLinearized)
 				{
 					activeResiduals.push_back(r);
@@ -458,7 +464,7 @@ float FullSystem::optimize(int mnumOptIts)
 
 
 
-
+	// 多线程
 	if(multiThreading)
 		treadReduce.reduce(boost::bind(&FullSystem::applyRes_Reductor, this, true, _1, _2, _3, _4), 0, activeResiduals.size(), 50);
 	else

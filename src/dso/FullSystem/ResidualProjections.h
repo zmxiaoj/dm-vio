@@ -57,7 +57,26 @@ EIGEN_STRONG_INLINE bool projectPoint(
 }
 
 
-
+/**
+ * @brief 将host帧上的点投影到新的帧，并计算新的逆深度，判断是否在图像内
+ * 
+ * @param u_pt [in] 像素坐标
+ * @param v_pt [in]
+ * @param idepth [in] 逆深度
+ * @param dx [in] 像素偏移量
+ * @param dy [in]
+ * @param HCalib [in]
+ * @param R [in]
+ * @param t [in]
+ * @param drescale [out] target帧逆深度与host帧逆深度比值
+ * @param u [out]
+ * @param v [out]
+ * @param Ku [out]
+ * @param Kv [out]
+ * @param KliP [out]
+ * @param new_idepth [out]
+ * @return EIGEN_STRONG_INLINE 
+ */
 EIGEN_STRONG_INLINE bool projectPoint(
 		const float &u_pt,const float &v_pt,
 		const float &idepth,
@@ -67,22 +86,28 @@ EIGEN_STRONG_INLINE bool projectPoint(
 		float &drescale, float &u, float &v,
 		float &Ku, float &Kv, Vec3f &KliP, float &new_idepth)
 {
+	// host帧归一化平面上的点
 	KliP = Vec3f(
 			(u_pt+dx-HCalib->cxl())*HCalib->fxli(),
 			(v_pt+dy-HCalib->cyl())*HCalib->fyli(),
 			1);
 
 	Vec3f ptp = R * KliP + t*idepth;
+	// target帧逆深度与host帧逆深度比值
 	drescale = 1.0f/ptp[2];
+	// 新的帧上逆深度
 	new_idepth = idepth*drescale;
 
 	if(!(drescale>0)) return false;
 
+	// 归一化平面
 	u = ptp[0] * drescale;
 	v = ptp[1] * drescale;
+	// 像素平面
 	Ku = u*HCalib->fxl() + HCalib->cxl();
 	Kv = v*HCalib->fyl() + HCalib->cyl();
 
+	// 投影像素点是否在图像内
 	return Ku>1.1f && Kv>1.1f && Ku<wM3G && Kv<hM3G;
 }
 

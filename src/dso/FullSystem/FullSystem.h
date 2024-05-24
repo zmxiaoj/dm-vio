@@ -291,6 +291,7 @@ private:
 
 	// vector 地图内关键帧容器，保存FrameHessian对象指针
 	std::vector<FrameHessian*> frameHessians;	// ONLY changed in marginalizeFrame and addFrame.
+	// vector 未线性化(边缘化)的残差容器，保存PointHessian对象指针
 	std::vector<PointFrameResidual*> activeResiduals;
 	float currentMinActDist;
 

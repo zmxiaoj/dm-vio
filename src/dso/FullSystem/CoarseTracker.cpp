@@ -989,7 +989,7 @@ void CoarseDistanceMap::makeDistanceMap(
 		Mat33f KRKi = (K[1] * fhToNew.rotationMatrix().cast<float>() * Ki[0]);
 		Vec3f Kt = (K[1] * fhToNew.translation().cast<float>());
 
-		// 
+		// 遍历关键帧中的PointHessian，统计投影到frame帧中有效点的数目及坐标
 		for(PointHessian* ph : fh->pointHessians)
 		{
 			assert(ph->status == PointHessian::ACTIVE);
@@ -1005,6 +1005,7 @@ void CoarseDistanceMap::makeDistanceMap(
 		}
 	}
 
+	// 对bfsList1中统计的有效点进行BFS，生成距离场图
 	growDistBFS(numItems);
 }
 
@@ -1017,7 +1018,11 @@ void CoarseDistanceMap::makeInlierVotes(std::vector<FrameHessian*> frameHessians
 }
 
 
-
+/**
+ * @brief 
+ * 
+ * @param bfsNum 
+ */
 void CoarseDistanceMap::growDistBFS(int bfsNum)
 {
 	assert(w[0] != 0);
@@ -1028,6 +1033,7 @@ void CoarseDistanceMap::growDistBFS(int bfsNum)
 		std::swap<Eigen::Vector2i*>(bfsList1,bfsList2);
 		bfsNum=0;
 
+		// 迭代次数为偶数，搜索上下左右
 		if(k%2==0)
 		{
 			for(int i=0;i<bfsNum2;i++)
@@ -1059,6 +1065,7 @@ void CoarseDistanceMap::growDistBFS(int bfsNum)
 				}
 			}
 		}
+		// 迭代次数为奇数，搜索上下左右+斜对角
 		else
 		{
 			for(int i=0;i<bfsNum2;i++)

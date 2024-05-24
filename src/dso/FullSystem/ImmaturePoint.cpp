@@ -554,7 +554,17 @@ float ImmaturePoint::calcResidual(
 
 
 
-
+/**
+ * @brief 计算当前ImmaturePoint逆深度的残差，正规方程(H和b)，残差状态
+ * 
+ * @param HCalib [in] 标定参数
+ * @param outlierTHSlack [in] 外点阈值
+ * @param tmpRes [in&out] 临时残差
+ * @param Hdd 
+ * @param bd 
+ * @param idepth [in] 逆深度初值
+ * @return double 累计残差
+ */
 double ImmaturePoint::linearizeResidual(
 		CalibHessian *  HCalib, const float outlierTHSlack,
 		ImmaturePointTemporaryResidual* tmpRes,
@@ -576,6 +586,7 @@ double ImmaturePoint::linearizeResidual(
 
 	Vec2f affLL = precalc->PRE_aff_mode;
 
+	// 遍历当前特征像素的所有pattern
 	for(int idx=0;idx<patternNum;idx++)
 	{
 		int dx = patternP[idx][0];
@@ -585,13 +596,15 @@ double ImmaturePoint::linearizeResidual(
 		float Ku, Kv;
 		Vec3f KliP;
 
+		// 投影当前特征像素到残差对应的帧，跳过图像外的像素
 		if(!projectPoint(this->u,this->v, idepth, dx, dy,HCalib,
 				PRE_RTll,PRE_tTll, drescale, u, v, Ku, Kv, KliP, new_idepth))
 			{tmpRes->state_NewState = ResState::OOB; return tmpRes->state_energy;}
 
-
+		// 获取target帧像素值, 水平梯度, 垂直梯度
 		Vec3f hitColor = (getInterpolatedElement33(dIl, Ku, Kv, wG[0]));
 
+		// 检查像素是否有效
 		if(!std::isfinite((float)hitColor[0])) {tmpRes->state_NewState = ResState::OOB; return tmpRes->state_energy;}
 		float residual = hitColor[0] - (affLL[0] * color[idx] + affLL[1]);
 
@@ -605,6 +618,7 @@ double ImmaturePoint::linearizeResidual(
 
 		hw *= weights[idx]*weights[idx];
 
+		// 对逆深度的H和b进行累加
 		Hdd += (hw*d_idepth)*d_idepth;
 		bd += (hw*residual)*d_idepth;
 	}

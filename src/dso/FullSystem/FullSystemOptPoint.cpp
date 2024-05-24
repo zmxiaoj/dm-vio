@@ -47,11 +47,19 @@ namespace dso
 {
 
 
-
+/**
+ * @brief 优化ImmatruePoint对象逆深度，将筛选后的ImmaturePoint创建为PointHessian对象
+ * 
+ * @param point 
+ * @param minObs 
+ * @param residuals 
+ * @return PointHessian* 
+ */
 PointHessian* FullSystem::optimizeImmaturePoint(
 		ImmaturePoint* point, int minObs,
 		ImmaturePointTemporaryResidual* residuals)
 {
+	// 初始化ImmaturePoint在其他关键帧(除了自己host帧)上的残差
 	int nres = 0;
 	for(FrameHessian* fh : frameHessians)
 	{
@@ -71,13 +79,15 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	float lastEnergy = 0;
 	float lastHdd=0;
 	float lastbd=0;
+	// 逆深度的初始值，ImmaturePoint的idepth_min和idepth_max的平均值
 	float currentIdepth=(point->idepth_max+point->idepth_min)*0.5f;
 
 
 
 
 
-
+	// 使用类LM(GN)的方法来优化逆深度, 而不是使用三角化
+	// 计算残差和能量函数
 	for(int i=0;i<nres;i++)
 	{
 		lastEnergy += point->linearizeResidual(&Hcalib, 1000, residuals+i,lastHdd, lastbd, currentIdepth);
@@ -93,10 +103,12 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 		return 0;
 	}
 
-	if(print) printf("Activate point. %d residuals. H=%f. Initial Energy: %f. Initial Id=%f\n" ,
+	if(print) 
+		printf("Activate point. %d residuals. H=%f. Initial Energy: %f. Initial Id=%f\n" ,
 			nres, lastHdd,lastEnergy,currentIdepth);
 
 	float lambda = 0.1;
+	// 进行GN迭代优化逆深度
 	for(int iteration=0;iteration<setting_GNItsOnPointActivation;iteration++)
 	{
 		float H = lastHdd;
@@ -124,6 +136,7 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 				"",
 				lastEnergy, newEnergy, newIdepth);
 
+		// 如果新的能量函数值小于上一次的能量函数值，则更新逆深度
 		if(newEnergy < lastEnergy)
 		{
 			currentIdepth = newIdepth;
@@ -153,11 +166,12 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 		return (PointHessian*)((long)(-1));		// yeah I'm like 99% sure this is OK on 32bit systems.
 	}
 
-
+	// 统计好点数目
 	int numGoodRes=0;
 	for(int i=0;i<nres;i++)
 		if(residuals[i].state_state == ResState::IN) numGoodRes++;
 
+	// 好点数目小于最小观测数目阈值
 	if(numGoodRes < minObs)
 	{
 		if(print) printf("OptPoint: OUTLIER!\n");
@@ -165,7 +179,7 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	}
 
 
-
+	// 将好点ImmaturePoint创建为PointHessian对象
 	PointHessian* p = new PointHessian(point, &Hcalib);
 	if(!std::isfinite(p->energyTH)) {delete p; return (PointHessian*)((long)(-1));}
 
@@ -177,6 +191,7 @@ PointHessian* FullSystem::optimizeImmaturePoint(
 	p->setIdepth(currentIdepth);
 	p->setPointStatus(PointHessian::ACTIVE);
 
+	// 计算PointFrameResidual
 	for(int i=0;i<nres;i++)
 		if(residuals[i].state_state == ResState::IN)
 		{

@@ -626,10 +626,10 @@ void FullSystem::traceNewCoarse(FrameHessian* fh)
 
 
 /**
- * @brief 处理待激活的像素
+ * @brief 处理待激活的像素，从ImmaturePoint转换为PointHessian
  * 
- * @param optimized 
- * @param toOptimize 
+ * @param optimized [in&out]
+ * @param toOptimize [in]
  * @param min 
  * @param max 
  * @param stats 
@@ -643,6 +643,7 @@ void FullSystem::activatePointsMT_Reductor(
 	ImmaturePointTemporaryResidual* tr = new ImmaturePointTemporaryResidual[frameHessians.size()];
 	for(int k=min;k<max;k++)
 	{
+		// 优化ImmatruePoint对象逆深度，将筛选后的ImmaturePoint创建为PointHessian对象
 		(*optimized)[k] = optimizeImmaturePoint((*toOptimize)[k],1,tr);
 	}
 	delete[] tr;
@@ -650,13 +651,13 @@ void FullSystem::activatePointsMT_Reductor(
 
 
 /**
- * @brief 
+ * @brief 处理挑选出来待激活的点
  * 
  */
 void FullSystem::activatePointsMT()
 {
     dmvio::TimeMeasurement timeMeasurement("activatePointsMT");
-
+	// 阈值计算, 通过距离地图来控制数目
 	// 计算阈值(魔法)参数 currentMinActDist(default=2)
     if(ef->nPoints < setting_desiredPointDensity*0.66)
 		currentMinActDist -= 0.8;
@@ -695,7 +696,8 @@ void FullSystem::activatePointsMT()
 
 	//coarseTracker->debugPlotDistMap("distMap");
 
-	std::vector<ImmaturePoint*> toOptimize; toOptimize.reserve(20000);
+	std::vector<ImmaturePoint*> toOptimize; 
+	toOptimize.reserve(20000);
 
 	// 遍历地图内全部关键帧frameHessians
 	for(FrameHessian* host : frameHessians)		// go through all active frames
@@ -1536,6 +1538,7 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	allKeyFramesHistory.push_back(fh->shell);
 	ef->insertFrame(fh, &Hcalib);
 
+	// 计算两两关键帧间的相对位姿和位姿线性化点
 	setPrecalcValues();
 
 
@@ -1882,7 +1885,7 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 
 
 /**
- * @brief 计算两两关键帧间的相对位姿
+ * @brief 计算两两关键帧间的相对位姿和位姿线性化点
  *        每添加一个关键帧都会运行设置位姿, 设置位姿线性化点
  * 
  */

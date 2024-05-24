@@ -89,6 +89,7 @@ public:
 
 
 	// status.
+	// 计算完成res_toZeroF
 	bool isLinearized;
 
 	// if residual is not OOB & not OUTLIER & should be used during accumulations
