@@ -18,11 +18,11 @@ bin/dmvio_dataset
     calib=$PATH_TO_DMVIO/configs/tumvi_calib/camera02.txt
     gamma=$PATH_TO_DMVIO/configs/tumvi_calib/pcalib.txt
     imuCalib=$PATH_TO_DMVIO/configs/tumvi_calib/camchain.yaml
+    resultsPrefix=$PATH_TO_RESULTS/
+    settingsFile=$PATH_TO_DMVIO/configs/tumvi.yaml
     mode=0
     use16Bit=1
     preset=0                                                        # use 1 for realtime
     nogui=1                                                         # use 1 to enable GUI
-    resultsPrefix=$PATH_TO_RESULTS/
-    settingsFile=$PATH_TO_DMVIO/configs/tumvi.yaml
     start=2                                                         
 

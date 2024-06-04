@@ -33,22 +33,28 @@ struct RawResidualJacobian
 {
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 	// ================== new structure: save independently =============.
+	// 8x1 对应residual_21，1个点的8个pattern residual
 	VecNRf resF;
 
 	// the two rows of d[x,y]/d[xi].
+	// target帧中像素坐标(u, v)_2x1关于host到target间相对位姿(\xi_21)_6x1的梯度_2x6
 	Vec6f Jpdxi[2];			// 2x6
 
 	// the two rows of d[x,y]/d[C].
+	// 像素坐标(u, v)_2x1关于相机内参(fx, fy, cx, cy)_4x1的梯度_2x4
 	VecCf Jpdc[2];			// 2x4
 
 	// the two rows of d[x,y]/d[idepth].
+	// 像素坐标(u, v)_2x1关于host帧逆深度_1x1的梯度_2x1
 	Vec2f Jpdd;				// 2x1
 
 	// the two columns of d[r]/d[x,y].
-	VecNRf JIdx[2];			// 9x2
+	// 残差关于像素坐标(u, v)_2x1的梯度
+	VecNRf JIdx[2];			// 9x2 -->实际为 8x2
 
 	// = the two columns of d[r] / d[ab]
-	VecNRf JabF[2];			// 9x2
+	// 残差关于帧间光度参数(a, b)_2x1的梯度
+	VecNRf JabF[2];			// 9x2 -->实际为 8x2
 
 
 	// = JIdx^T * JIdx (inner product). Only as a shorthand.

@@ -98,8 +98,12 @@ void PangolinDSOViewer::run()
 {
 	printf("START PANGOLIN!\n");
 
-	pangolin::CreateWindowAndBind("Main",2*w,2*h);
-	const int UI_WIDTH = 180;
+	pangolin::CreateWindowAndBind("Main",4*w,4*h);
+
+	// 设定背景颜色
+	glClearColor(1.0f, 1.0f, 1.0f, 0.0f);
+	
+	const int UI_WIDTH = 360;
 
 	glEnable(GL_DEPTH_TEST);
 

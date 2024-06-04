@@ -144,17 +144,22 @@ private:
 	void calcLEnergyPt(int min, int max, Vec10* stats, int tid);
 
 	void orthogonalize(VecX* b, MatXX* H);
+	// host和target间位姿增量，一共帧数*帧数个
 	Mat18f* adHTdeltaF;
 
+	// 伴随矩阵，double
 	Mat88* adHost;
 	Mat88* adTarget;
 
+	// 伴随矩阵，float
 	Mat88f* adHostF;
 	Mat88f* adTargetF;
 
-
+	// setting_initialCalibHessian 信息矩阵
 	VecC cPrior;
+	// 相机内参增量
 	VecCf cDeltaF;
+	// 信息矩阵，float
 	VecCf cPriorF;
 
 	AccumulatedTopHessianSSE* accSSE_top_L;

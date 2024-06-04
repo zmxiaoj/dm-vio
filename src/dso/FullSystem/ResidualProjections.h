@@ -92,6 +92,7 @@ EIGEN_STRONG_INLINE bool projectPoint(
 			(v_pt+dy-HCalib->cyl())*HCalib->fyli(),
 			1);
 
+	// host帧上的点在target帧上的投影
 	Vec3f ptp = R * KliP + t*idepth;
 	// target帧逆深度与host帧逆深度比值
 	drescale = 1.0f/ptp[2];

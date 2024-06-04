@@ -211,7 +211,7 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 }
 
 /**
- * @brief 
+ * @brief 计算host到target间的相对位姿变换
  * 
  * @param host 
  * @param target 
@@ -241,12 +241,16 @@ void FrameFramePrecalc::set(FrameHessian* host, FrameHessian* target, CalibHessi
 	K(0,2) = HCalib->cxl();
 	K(1,2) = HCalib->cyl();
 	K(2,2) = 1;
+	// K * R * K^(-1)
 	PRE_KRKiTll = K * PRE_RTll * K.inverse();
+	// R * K^(-1) 
 	PRE_RKiTll = PRE_RTll * K.inverse();
+	// K * t
 	PRE_KtTll = K * PRE_tTll;
 
-
+	// host与target间的仿射变换 a b
 	PRE_aff_mode = AffLight::fromToVecExposure(host->ab_exposure, target->ab_exposure, host->aff_g2l(), target->aff_g2l()).cast<float>();
+	// host的光度参数b
 	PRE_b0_mode = host->aff_g2l_0().b;
 }
 

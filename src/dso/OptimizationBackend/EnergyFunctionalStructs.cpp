@@ -36,15 +36,26 @@ namespace dso
 {
 
 
+/**
+ * @brief 计算JpJdF 
+ *        [dr_21_dxi^T * dr_21_did _6x1
+ *         dr_21_da^T *  dr_21_did _1x1
+ *         dr_21_db^T *  dr_21_did _1x1]_8x1
+ * 
+ */
 void EFResidual::takeDataF()
 {
 	std::swap<RawResidualJacobian*>(J, data->J);
 
+	// JIdx^T * JIdx * Jpdd
+	// 残差关于像素坐标梯度^T_2x8 * 残差关于像素坐标梯度_8x2 * 像素坐标关于逆深度梯度_2x1
 	Vec2f JI_JI_Jd = J->JIdx2 * J->Jpdd;
 
+	// 残差关于位姿的梯度^T_6x2 * 残差关于像素坐标梯度^T_2x8 * 残差关于像素坐标梯度_8x2 * 像素坐标关于逆深度梯度_2x1
 	for(int i=0;i<6;i++)
 		JpJdF[i] = J->Jpdxi[0][i]*JI_JI_Jd[0] + J->Jpdxi[1][i] * JI_JI_Jd[1];
 
+	// 残差关于光度参数的梯度^T_2x2 * 残差关于像素坐标梯度^T_2x8 * 残差关于像素坐标梯度_8x2 * 像素坐标关于逆深度梯度_2x1
 	JpJdF.segment<2>(6) = J->JabJIdx*J->Jpdd;
 }
 

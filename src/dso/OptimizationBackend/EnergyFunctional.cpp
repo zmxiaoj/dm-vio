@@ -181,7 +181,11 @@ EnergyFunctional::~EnergyFunctional()
 
 
 
-
+/**
+ * @brief 计算各种状态的相对增量
+ * 
+ * @param HCalib 
+ */
 void EnergyFunctional::setDeltaF(CalibHessian* HCalib)
 {
 	if(adHTdeltaF != 0) delete[] adHTdeltaF;
@@ -356,6 +360,14 @@ double EnergyFunctional::calcMEnergyF(bool useNewValues)
 }
 
 
+/**
+ * @brief 计算所有点的能量和
+ * 
+ * @param min 
+ * @param max 
+ * @param stats 
+ * @param tid 
+ */
 void EnergyFunctional::calcLEnergyPt(int min, int max, Vec10* stats, int tid)
 {
 
@@ -420,7 +432,12 @@ void EnergyFunctional::calcLEnergyPt(int min, int max, Vec10* stats, int tid)
 
 
 
-
+/**
+ * @brief 多线程计算能量
+ *        先验 + 点残差
+ * 
+ * @return double 
+ */
 double EnergyFunctional::calcLEnergyF_MT()
 {
 	assert(EFDeltaValid);
@@ -428,10 +445,14 @@ double EnergyFunctional::calcLEnergyF_MT()
 	assert(EFIndicesValid);
 
 	double E = 0;
+    // 先验的能量 (x-x_prior)^T * ∑ * (x-x_prior)
+	// 因为 f->prior 是hessian的对角线, 使用向量表示, 所以使用cwiseProduct进行逐个相乘
 	for(EFFrame* f : frames)
 	{
+        // 位姿先验
         E += f->delta_prior.cwiseProduct(f->prior).dot(f->delta_prior);
 	}
+    // 相机内参先验
 	E += cDeltaF.cwiseProduct(cPriorF).dot(cDeltaF);
 
 	red->reduce(boost::bind(&EnergyFunctional::calcLEnergyPt,
@@ -875,7 +896,13 @@ void EnergyFunctional::orthogonalize(VecX* b, MatXX* H)
 
 }
 
-
+/**
+ * @brief 计算正规方程，求解
+ * 
+ * @param iteration [in] int 迭代次数
+ * @param lambda [in]
+ * @param HCalib 
+ */
 void EnergyFunctional::solveSystemF(int iteration, double lambda, CalibHessian* HCalib)
 {
     if(setting_solverMode & SOLVER_USE_GN) lambda=0;
@@ -884,21 +911,24 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda, CalibHessian* 
     assert(EFDeltaValid);
     assert(EFAdjointsValid);
     assert(EFIndicesValid);
-
+    // 先计算正规方程, 涉及边缘化, 先验, 舒尔补等
     MatXX HL_top, HA_top, H_sc;
     VecX  bL_top, bA_top, bM_top, b_sc;
 
+    // 针对新的残差, 使用的当前残差, 没有逆深度的部分
     accumulateAF_MT(HA_top, bA_top,multiThreading);
 
-
+    //* 边缘化fix的残差, 有边缘化对的, 使用的res_toZeroF减去线性化部分, 加上先验, 没有逆深度的部分
+	//bug: 这里根本就没有点参与了, 只有先验信息, 因为边缘化的和删除的点都不在了
+	//! 这里唯一的作用就是 把 p相关的置零
     accumulateLF_MT(HL_top, bL_top,multiThreading);
 
 
-
+    // 关于逆深度的Schur部分
     accumulateSCF_MT(H_sc, b_sc,multiThreading);
 
 
-
+    // 由于固定线性化点, 每次迭代更新残差
     bM_top = (bM+ HM * getStitchedDeltaF());
     VecX bMGTSAM_top = (bMForGTSAM + HMForGTSAM * getStitchedDeltaF());
 
@@ -910,7 +940,7 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda, CalibHessian* 
 
     MatXX HFinal_top;
     VecX bFinal_top;
-
+    // 如果是设置求解正交系统, 则把相对应的零空间部分Jacobian设置为0, 否则正常计算schur
     if(setting_solverMode & SOLVER_ORTHOGONALIZE_SYSTEM)
     {
         // have a look if prior is there.
@@ -958,7 +988,7 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda, CalibHessian* 
 
 
 
-
+    // 使用SVD求解, 或者ldlt直接求解
     VecX x;
     if(setting_solverMode & SOLVER_SVD)
     {
@@ -1014,7 +1044,7 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda, CalibHessian* 
     }
 
 
-
+    // 如果设置的是直接对解进行处理, 直接去掉解x中的零空间
     if((setting_solverMode & SOLVER_ORTHOGONALIZE_X) || (iteration >= 2 && (setting_solverMode & SOLVER_ORTHOGONALIZE_X_LATER)))
     {
         VecX xOld = x;
@@ -1024,7 +1054,7 @@ void EnergyFunctional::solveSystemF(int iteration, double lambda, CalibHessian* 
 
     lastX = x;
 
-
+    // 分别求出各个待求量的增量值
     //resubstituteF(x, HCalib);
     currentLambda= lambda;
     resubstituteF_MT(x, HCalib,multiThreading);

@@ -611,7 +611,8 @@ Vec3f CoarseInitializer::calcResAndGS(
 				 * 	x_j' = id_j * (R_i2j * X_i + t_i2j)
 				 * 		 = id_j * (R_i2j * id_i^-1 * K^-1 * x_i + t_i2j)
 				 *       = [u_j', v_j', 1]^T
-				 * 
+				 *  
+				 *  像素坐标关于归一化坐标的梯度 dx_j_dx_j'
 				 *  dx_j_d\ksi_i2j = dx_j_dx_j' * dx_j'_d\ksi_i2j 
 				 *  
 				 *  dx_j_dx_j' = [f_x 0   0; 
@@ -673,6 +674,9 @@ Vec3f CoarseInitializer::calcResAndGS(
 				 *  dr_dx_j = w_huber * dI(x_j)_dx_j(图像梯度) 
 				 *          = w_huber * [I(x_j)_dx I(x_j)_dy 0]
 				 *  -------------------------------------------
+				 *  像素坐标关于逆深度的梯度 dx_j_did_i
+				 *  像素坐标关于归一化坐标的梯度 dx_j_dx_j'
+				 *  归一化坐标关于逆深度的梯度 dx_j'_did_i
 				 *  dx_j_did_i = dx_j_dx_j' * dx_j'_did_i
 				 *  -------------------------------------------
 				 *  dx_j'_did_i = [du_j'_did_i, dv_j'_did_i, 0]^T

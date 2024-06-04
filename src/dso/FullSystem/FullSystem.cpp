@@ -1524,7 +1524,7 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	boost::unique_lock<boost::mutex> lock(mapMutex);
 
 	// =========================== Flag Frames to be Marginalized. =========================
-	// 标记需要边缘化帧
+	// 标记帧对象中需要边缘化的点
 	flagFramesForMarginalization(fh);
 
 
@@ -1587,13 +1587,14 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	// =========================== OPTIMIZE ALL =========================
 	// 对滑窗内的关键帧进行优化
 	fh->frameEnergyTH = frameHessians.back()->frameEnergyTH;
+	// TODO
 	float rmse = optimize(setting_maxOptIterations);
 
 
 
 
 	// =========================== Figure Out if INITIALIZATION FAILED =========================
-	// 初始化失败时输出信息
+	// 当关键帧数目少于4时，根据残差大小判断初始化是否失败
 	if(allKeyFramesHistory.size() <= 4)
 	{
 		if(allKeyFramesHistory.size()==2 && rmse > 20*benchmark_initializerSlackFactor)
