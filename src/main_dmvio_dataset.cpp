@@ -379,6 +379,11 @@ void run(ImageFolderReader* reader, IOWrap::PangolinDSOViewer* viewer)
     struct timeval tv_end;
     gettimeofday(&tv_end, NULL);
 
+    // 在此处令系统暂停，等待键盘输入后结束
+    std::cout << "Wait Keyboard Input!" << std::endl;
+    getchar();
+
+
     // 输出结果
     fullSystem->printResult(imuSettings.resultsPrefix + "result.txt", false, false, true);
     fullSystem->printResult(imuSettings.resultsPrefix + "resultKFs.txt", true, false, false);

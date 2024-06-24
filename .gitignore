@@ -6,3 +6,4 @@
 build/
 result/
 cmake-*
+dm-vio_paper_results/
